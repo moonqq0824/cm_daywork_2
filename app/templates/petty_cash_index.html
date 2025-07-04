@@ -76,9 +76,11 @@
                                     <i class="bi bi-search"></i>
                                 </a>
 
-                                {% if '餘額結轉' not in transaction.description and (transaction.status ==
-                                ApprovalStatus.DRAFT or current_user.is_manager()) %}
+                                {% if '結餘結轉' not in transaction.description %}
 
+                                {% if (transaction.status == ApprovalStatus.DRAFT and (transaction.applicant_id ==
+                                current_user.id or current_user.is_manager())) or (transaction.status ==
+                                ApprovalStatus.REJECTED and transaction.applicant_id == current_user.id) %}
                                 {% if transaction.transaction_type == TransactionType.EXPENDITURE %}
                                 <a href="{{ url_for('petty_cash.edit_transaction', transaction_id=transaction.id) }}"
                                     class="btn btn-sm btn-outline-secondary" title="編輯">
@@ -90,11 +92,16 @@
                                     <i class="bi bi-pencil-fill"></i>
                                 </a>
                                 {% endif %}
+                                {% endif %}
 
+                                {% if transaction.status == ApprovalStatus.DRAFT and (transaction.applicant_id ==
+                                current_user.id or current_user.is_manager()) %}
                                 <button type="button" class="btn btn-sm btn-outline-danger" data-bs-toggle="modal"
                                     data-bs-target="#deleteModal" data-bs-id="{{ transaction.id }}" title="刪除">
                                     <i class="bi bi-trash3-fill"></i>
                                 </button>
+                                {% endif %}
+
                                 {% endif %}
                             </div>
                         </td>

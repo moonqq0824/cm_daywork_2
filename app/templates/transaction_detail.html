@@ -8,9 +8,10 @@
             <i class="bi bi-arrow-left-circle"></i> 返回列表
         </a>
 
-        {% if '餘額結轉' not in transaction.description %}
-        {% if transaction.status == ApprovalStatus.DRAFT and (transaction.applicant_id == current_user.id or
-        current_user.is_manager()) %}
+        {% if '結餘結轉' not in transaction.description %}
+
+        {% if transaction.status in [ApprovalStatus.DRAFT, ApprovalStatus.REJECTED] and transaction.applicant_id ==
+        current_user.id %}
         <form action="{{ url_for('petty_cash.submit_for_approval', transaction_id=transaction.id) }}" method="POST"
             class="me-2">
             <button type="submit" class="btn btn-success">
@@ -19,7 +20,9 @@
         </form>
         {% endif %}
 
-        {% if transaction.status == ApprovalStatus.DRAFT or current_user.is_manager() %}
+        {% if (transaction.status == ApprovalStatus.DRAFT and (transaction.applicant_id == current_user.id or
+        current_user.is_manager())) or (transaction.status == ApprovalStatus.REJECTED and transaction.applicant_id ==
+        current_user.id) %}
         {% if transaction.transaction_type == TransactionType.EXPENDITURE %}
         <a href="{{ url_for('petty_cash.edit_transaction', transaction_id=transaction.id) }}"
             class="btn btn-primary me-2">
@@ -30,7 +33,10 @@
             <i class="bi bi-pencil-square"></i> 編輯
         </a>
         {% endif %}
+        {% endif %}
 
+        {% if transaction.status == ApprovalStatus.DRAFT and (transaction.applicant_id == current_user.id or
+        current_user.is_manager()) %}
         <form action="{{ url_for('petty_cash.delete_transaction', transaction_id=transaction.id) }}" method="POST"
             onsubmit="return confirm('您確定要刪除這筆交易嗎？');">
             <button type="submit" class="btn btn-danger">
@@ -38,9 +44,9 @@
             </button>
         </form>
         {% endif %}
+
         {% endif %}
     </div>
-</div>
 </div>
 
 <div class="row">
@@ -132,6 +138,11 @@
                 </span>
             </div>
             <div class="card-body">
+                {% if transaction.status == ApprovalStatus.REJECTED and transaction.rejection_reason %}
+                <div class="alert alert-danger">
+                    <strong>駁回理由：</strong> {{ transaction.rejection_reason }}
+                </div>
+                {% endif %}
                 <ul class="list-group list-group-flush">
                     <li class="list-group-item d-flex justify-content-between align-items-center">
                         <span>申請人</span>

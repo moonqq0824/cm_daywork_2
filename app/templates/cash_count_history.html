@@ -23,7 +23,7 @@
                         <th class="text-end">盤點金額</th>
                         <th class="text-end">系統餘額</th>
                         <th class="text-end">差額</th>
-                        <th>操作</th>
+                        <th class="text-center">操作</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -31,17 +31,23 @@
                     <tr>
                         <td>{{ session.id }}</td>
                         <td>{{ session.count_date.strftime('%Y-%m-%d %H:%M') }}</td>
-                        <td>{{ session.user.username }}</td>
+                        <td>{{ session.user.display_name }}</td>
                         <td class="text-end">${{ "%.0f"|format(session.counted_total) }}</td>
                         <td class="text-end">${{ "%.0f"|format(session.system_balance) }}</td>
                         <td class="text-end {% if session.difference != 0 %}text-danger fw-bold{% endif %}">
                             ${{ "%.0f"|format(session.difference) }}
                         </td>
-                        <td>
-                            <a href="{{ url_for('petty_cash.cash_count_session_detail', session_id=session.id) }}"
-                                class="btn btn-sm btn-outline-primary">
-                                <i class="bi bi-search"></i> 查看詳情
-                            </a>
+                        <td class="text-center">
+                            <div class="btn-group" role="group">
+                                <a href="{{ url_for('petty_cash.cash_count_session_detail', session_id=session.id) }}"
+                                    class="btn btn-sm btn-outline-primary" title="查看詳情">
+                                    <i class="bi bi-search"></i>
+                                </a>
+                                <button type="button" class="btn btn-sm btn-outline-danger" data-bs-toggle="modal"
+                                    data-bs-target="#deleteCountModal" data-bs-id="{{ session.id }}" title="刪除">
+                                    <i class="bi bi-trash3-fill"></i>
+                                </button>
+                            </div>
                         </td>
                     </tr>
                     {% else %}
@@ -55,26 +61,43 @@
     </div>
 </div>
 
-{% if sessions.pages > 1 %}
-<nav aria-label="Page navigation" class="mt-4">
-    <ul class="pagination justify-content-center">
-        <li class="page-item {% if not sessions.has_prev %}disabled{% endif %}">
-            <a class="page-link" href="{{ url_for('petty_cash.cash_count_history', page=sessions.prev_num) }}">上一頁</a>
-        </li>
-        {% for page_num in sessions.iter_pages() %}
-        {% if page_num %}
-        <li class="page-item {% if sessions.page == page_num %}active{% endif %}">
-            <a class="page-link" href="{{ url_for('petty_cash.cash_count_history', page=page_num) }}">{{ page_num }}</a>
-        </li>
-        {% else %}
-        <li class="page-item disabled"><span class="page-link">...</span></li>
-        {% endif %}
-        {% endfor %}
-        <li class="page-item {% if not sessions.has_next %}disabled{% endif %}">
-            <a class="page-link" href="{{ url_for('petty_cash.cash_count_history', page=sessions.next_num) }}">下一頁</a>
-        </li>
-    </ul>
-</nav>
-{% endif %}
+...
 
+<div class="modal fade" id="deleteCountModal" tabindex="-1" aria-labelledby="deleteCountModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="deleteCountModalLabel">確認刪除盤點紀錄</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                您確定要刪除這筆盤點紀錄嗎？此操作無法復原。
+            </div>
+            <div class="modal-footer">
+                <form id="deleteCountForm" method="POST" action="">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-danger">確認刪除</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        var deleteModal = document.getElementById('deleteCountModal');
+        if (deleteModal) {
+            deleteModal.addEventListener('show.bs.modal', function (event) {
+                var button = event.relatedTarget;
+                var sessionId = button.getAttribute('data-bs-id');
+                var deleteForm = document.getElementById('deleteCountForm');
+                // 動態設定表單的 action URL
+                deleteForm.action = '/accounting/cash_count_history/' + sessionId + '/delete';
+            });
+        }
+    });
+</script>
 {% endblock %}

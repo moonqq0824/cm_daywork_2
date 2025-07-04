@@ -3,7 +3,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from flask_login import login_required, current_user
 from app import db
 from .models import Transaction, TransactionItem, TransactionType, TaxType, TaxCalculationMethod, ApprovalStatus, CashCountSession, CashCountDetail
-from .forms import ExpenditureForm, IncomeForm, MonthEndSettlementForm
+from .forms import ExpenditureForm, IncomeForm, MonthEndSettlementForm, RejectionForm
 from datetime import date, datetime, timedelta
 from sqlalchemy import func, extract
 from app.modules.user.routes import manager_required
@@ -382,12 +382,36 @@ def settle_month_end():
 @login_required
 def cash_count_tool():
     """顯示現金盤點工具頁面"""
-    # 計算目前的總餘額，這個邏輯和首頁 index 的一樣
-    total_income = db.session.query(func.sum(Transaction.total_amount)).filter(Transaction.transaction_type == TransactionType.INCOME).scalar() or Decimal('0.0')
-    total_expenditure = db.session.query(func.sum(Transaction.total_amount)).filter(Transaction.transaction_type == TransactionType.EXPENDITURE).scalar() or Decimal('0.0')
-    balance = total_income + total_expenditure
+    # --- ▼▼▼ 使用與首頁 index 完全相同的、最正確的計算邏輯 ▼▼▼ ---
     
-    return render_template('cash_count_tool.html', system_balance=balance)
+    # 1. 找到最新的一筆結轉紀錄
+    latest_settlement = Transaction.query.filter(
+        Transaction.description.like('%餘額結轉%')
+    ).order_by(Transaction.transaction_date.desc()).first()
+
+    # 2. 決定計算的起始點（期初餘額）
+    balance = Decimal('0.0')
+    start_date = date(1900, 1, 1)
+    if latest_settlement:
+        balance = latest_settlement.total_amount
+        start_date = latest_settlement.transaction_date
+
+    # 3. 計算從起始點到今天為止，所有新發生的收支
+    income_since_start = db.session.query(func.sum(Transaction.total_amount)).filter(
+        Transaction.transaction_type == TransactionType.INCOME,
+        Transaction.transaction_date > start_date,
+        ~Transaction.description.like('%餘額結轉%')
+    ).scalar() or Decimal('0.0')
+
+    expenditure_since_start = db.session.query(func.sum(Transaction.total_amount)).filter(
+        Transaction.transaction_type == TransactionType.EXPENDITURE,
+        Transaction.transaction_date > start_date
+    ).scalar() or Decimal('0.0')
+
+    # 4. 得到最終正確的目前餘額
+    current_balance = balance + income_since_start + expenditure_since_start
+    
+    return render_template('cash_count_tool.html', system_balance=current_balance)
 
 @petty_cash_bp.route('/tools/cash_count/save', methods=['POST'])
 @login_required
@@ -461,19 +485,23 @@ def cash_count_session_detail(session_id):
 
 @petty_cash_bp.route('/approvals')
 @login_required
-@manager_required # 只有主管能存取
+@manager_required
 def approval_dashboard():
     """顯示待簽核儀表板"""
     page = request.args.get('page', 1, type=int)
-    
-    # 查詢所有狀態為 PENDING 的交易
     pending_transactions = Transaction.query.filter_by(
         status=ApprovalStatus.PENDING
     ).order_by(Transaction.application_date.asc()).paginate(
         page=page, per_page=15, error_out=False
     )
+    # ▼▼▼ 在此處新增 ▼▼▼
+    rejection_form = RejectionForm()
     
-    return render_template('approval_dashboard.html', transactions=pending_transactions)
+    return render_template(
+        'approval_dashboard.html', 
+        transactions=pending_transactions,
+        rejection_form=rejection_form # <--- 將表單傳遞給樣板
+    )
 
 @petty_cash_bp.route('/transaction/<int:transaction_id>/submit', methods=['POST'])
 @login_required
@@ -489,9 +517,13 @@ def submit_for_approval(transaction_id):
          flash('您沒有權限提交此申請。', 'danger')
          return redirect(url_for('petty_cash.transaction_detail', transaction_id=transaction_id))
 
-    if transaction.status == ApprovalStatus.DRAFT:
+    if transaction.status in [ApprovalStatus.DRAFT, ApprovalStatus.REJECTED]:
         try:
             transaction.status = ApprovalStatus.PENDING
+            # 當重新提交時，清除舊的簽核資訊，重新開始
+            transaction.approver_id = None
+            transaction.approval_date = None
+            transaction.rejection_reason = None
             db.session.commit()
             flash('支出申請已成功提交，等候主管簽核。', 'success')
         except Exception as e:
@@ -537,18 +569,45 @@ def reject_transaction(transaction_id):
     if not transaction:
         flash('找不到該筆交易。', 'danger')
         return redirect(url_for('petty_cash.approval_dashboard'))
-
-    if transaction.status == ApprovalStatus.PENDING:
-        try:
-            transaction.status = ApprovalStatus.REJECTED
-            transaction.approver_id = current_user.id
-            transaction.approval_date = datetime.utcnow()
-            db.session.commit()
-            flash(f'交易 ID: {transaction.id} 已駁回。', 'danger')
-        except Exception as e:
-            db.session.rollback()
-            flash(f'處理時發生錯誤：{e}', 'danger')
+    
+    form = RejectionForm()
+    if form.validate_on_submit():
+        if transaction.status == ApprovalStatus.PENDING:
+            try:
+                transaction.status = ApprovalStatus.REJECTED
+                transaction.approver_id = current_user.id
+                transaction.approval_date = datetime.utcnow()
+                transaction.rejection_reason = form.rejection_reason.data # <--- 儲存駁回理由
+                db.session.commit()
+                flash(f'交易 ID: {transaction.id} 已駁回。', 'success')
+            except Exception as e:
+                db.session.rollback()
+                flash(f'處理時發生錯誤：{e}', 'danger')
+        else:
+            flash('此交易不是待簽核狀態，無法操作。', 'warning')
     else:
-        flash('此交易不是待簽核狀態，無法操作。', 'warning')
+        flash('駁回時發生錯誤，請填寫駁回理由。', 'danger')
         
     return redirect(url_for('petty_cash.approval_dashboard'))
+
+@petty_cash_bp.route('/accounting/cash_count_history/<int:session_id>/delete', methods=['POST'])
+@login_required
+@manager_required # 只有主管才能刪除盤點紀錄
+def delete_cash_count_session(session_id):
+    """刪除一筆現金盤點紀錄"""
+    session_to_delete = db.session.get(CashCountSession, session_id)
+    if not session_to_delete:
+        flash('找不到該筆盤點紀錄。', 'danger')
+        return redirect(url_for('petty_cash.cash_count_history'))
+    
+    try:
+        # 因為我們在模型中設定了 cascade='all, delete-orphan'
+        # 所以刪除主表的同時，所有關聯的明細也會被一併刪除
+        db.session.delete(session_to_delete)
+        db.session.commit()
+        flash(f'盤點紀錄 (ID: {session_id}) 已成功刪除。', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'刪除時發生錯誤：{e}', 'danger')
+        
+    return redirect(url_for('petty_cash.cash_count_history'))

@@ -5,6 +5,7 @@ from wtforms.validators import DataRequired, NumberRange, Optional
 from .models import TaxType, TaxCalculationMethod
 from wtforms import SelectField
 from datetime import datetime
+from wtforms import TextAreaField
 
 class TransactionItemForm(FlaskForm):
     """子表單：用於單個明細項目"""
@@ -62,3 +63,8 @@ class MonthEndSettlementForm(FlaskForm):
         validators=[DataRequired()]
     )
     submit = SubmitField('執行結轉')
+
+class RejectionForm(FlaskForm):
+    """駁回理由表單"""
+    rejection_reason = TextAreaField('駁回理由', validators=[DataRequired()])
+    submit = SubmitField('確認駁回')

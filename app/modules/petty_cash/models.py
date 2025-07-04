@@ -46,6 +46,7 @@ class Transaction(db.Model):
     status = db.Column(db.Enum(ApprovalStatus), nullable=False, default=ApprovalStatus.DRAFT, server_default=ApprovalStatus.DRAFT.name, comment='簽核狀態')
     approver_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True, comment='簽核主管ID')
     approval_date = db.Column(db.Date, nullable=True, comment='簽核日期')
+    rejection_reason = db.Column(db.Text, nullable=True, comment='駁回理由')
 
     items = db.relationship('TransactionItem', backref='transaction', lazy=True, cascade='all, delete-orphan')
     approver = db.relationship('User', backref='approved_transactions', foreign_keys=[approver_id])

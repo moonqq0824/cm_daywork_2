@@ -27,7 +27,7 @@
                     <tr>
                         <td>{{ transaction.id }}</td>
                         <td>{{ transaction.application_date.strftime('%Y-%m-%d') }}</td>
-                        <td>{{ transaction.applicant_name }}</td>
+                        <td>{{ transaction.applicant.display_name }}</td>
                         <td>{{ transaction.description }}</td>
                         <td class="text-end fw-bold text-danger">
                             {{ "%.2f"|format(transaction.total_amount) }}
@@ -45,13 +45,10 @@
                                         <i class="bi bi-check-lg"></i>
                                     </button>
                                 </form>
-                                <form method="POST"
-                                    action="{{ url_for('petty_cash.reject_transaction', transaction_id=transaction.id) }}"
-                                    class="d-inline">
-                                    <button type="submit" class="btn btn-sm btn-outline-danger" title="駁回">
-                                        <i class="bi bi-x-lg"></i>
-                                    </button>
-                                </form>
+                                <button type="button" class="btn btn-sm btn-outline-danger" data-bs-toggle="modal"
+                                    data-bs-target="#rejectionModal" data-bs-id="{{ transaction.id }}" title="駁回">
+                                    <i class="bi bi-x-lg"></i>
+                                </button>
                             </div>
                         </td>
                     </tr>
@@ -66,23 +63,49 @@
     </div>
 </div>
 
-{% if transactions.pages > 1 %}
-<nav aria-label="Page navigation" class="mt-4">
-    <ul class="pagination justify-content-center">
-        <li class="page-item {% if not transactions.has_prev %}disabled{% endif %}">
-            <a class="page-link"
-                href="{{ url_for('petty_cash.approval_dashboard', page=transactions.prev_num) }}">上一頁</a>
-        </li>
-        {% for page_num in transactions.iter_pages() %}
-        <li class="page-item {% if transactions.page == page_num %}active{% endif %}">
-            <a class="page-link" href="{{ url_for('petty_cash.approval_dashboard', page=page_num) }}">{{ page_num }}</a>
-        </li>
-        {% endfor %}
-        <li class="page-item {% if not transactions.has_next %}disabled{% endif %}">
-            <a class="page-link"
-                href="{{ url_for('petty_cash.approval_dashboard', page=transactions.next_num) }}">下一頁</a>
-        </li>
-    </ul>
-</nav>
-{% endif %}
+...
+
+<div class="modal fade" id="rejectionModal" tabindex="-1" aria-labelledby="rejectionModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form id="rejectionForm" method="POST" action="">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="rejectionModalLabel">填寫駁回理由</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    {% set form = rejection_form %}
+                    <p>您即將駁回一筆申請，請填寫駁回原因，以利申請人修改。</p>
+                    {{ form.hidden_tag() }}
+                    <div class="mb-3">
+                        {{ form.rejection_reason.label(class="form-label") }}
+                        {{ form.rejection_reason(class="form-control", rows=4) }}
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    {{ form.submit(class="btn btn-danger") }}
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        var rejectionModal = document.getElementById('rejectionModal');
+        if (rejectionModal) {
+            rejectionModal.addEventListener('show.bs.modal', function (event) {
+                var button = event.relatedTarget;
+                var transactionId = button.getAttribute('data-bs-id');
+                var rejectionForm = document.getElementById('rejectionForm');
+                // 動態設定表單的 action URL
+                rejectionForm.action = '/transaction/' + transactionId + '/reject';
+            });
+        }
+    });
+</script>
 {% endblock %}
