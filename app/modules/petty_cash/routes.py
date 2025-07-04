@@ -3,9 +3,10 @@ from decimal import Decimal, ROUND_HALF_UP
 from flask_login import login_required
 from app import db
 from .models import Transaction, TransactionItem, TransactionType, TaxType, TaxCalculationMethod, ApprovalStatus
-from .forms import ExpenditureForm, IncomeForm
-from datetime import date, datetime
-from sqlalchemy import func
+from .forms import ExpenditureForm, IncomeForm, MonthEndSettlementForm
+from datetime import date, datetime, timedelta
+from sqlalchemy import func, extract
+import calendar # <--- 加入這個標準函式庫
 
 petty_cash_bp = Blueprint('petty_cash', __name__)
 
@@ -233,3 +234,91 @@ def delete_transaction(transaction_id):
         db.session.rollback()
         flash(f'刪除失敗，錯誤：{e}', 'danger')
     return redirect(url_for('petty_cash.index'))
+
+@petty_cash_bp.route('/accounting', methods=['GET'])
+@login_required
+def accounting_operations():
+    """顯示會計作業頁面"""
+    form = MonthEndSettlementForm()
+    # 預設為上一個月份
+    today = date.today()
+    first_day_of_month = today.replace(day=1)
+    last_month_date = first_day_of_month - timedelta(days=1)
+    form.year.data = str(last_month_date.year)
+    form.month.data = str(last_month_date.month)
+    return render_template('accounting_operations.html', form=form)
+
+
+@petty_cash_bp.route('/accounting/settle', methods=['POST'])
+@login_required
+def settle_month_end():
+    """處理月結作業的邏輯"""
+    form = MonthEndSettlementForm()
+    if form.validate_on_submit():
+        year = int(form.year.data)
+        month = int(form.month.data)
+
+        # 1. 計算指定月份的期末餘額
+        # 取得該月最後一天
+        _, last_day = calendar.monthrange(year, month)
+        end_date = date(year, month, last_day)
+
+        # 計算到該月底為止的所有收入和支出
+        total_income = db.session.query(func.sum(Transaction.total_amount)).filter(
+            Transaction.transaction_type == TransactionType.INCOME,
+            Transaction.transaction_date <= end_date
+        ).scalar() or Decimal('0.0')
+
+        total_expenditure = db.session.query(func.sum(Transaction.total_amount)).filter(
+            Transaction.transaction_type == TransactionType.EXPENDITURE,
+            Transaction.transaction_date <= end_date
+        ).scalar() or Decimal('0.0')
+        
+        month_end_balance = total_income + total_expenditure
+
+        # 2. 新增次月一號的期初餘額紀錄
+        # 計算次月一號的日期
+        if month == 12:
+            next_month_date = date(year + 1, 1, 1)
+        else:
+            next_month_date = date(year, month + 1, 1)
+
+        # 檢查是否已存在該筆結轉紀錄，避免重複執行
+        existing_settlement = Transaction.query.filter_by(
+            transaction_date=next_month_date,
+            description=f'{year}年{month}月 餘額結轉'
+        ).first()
+
+        if existing_settlement:
+            flash(f'錯誤：{year}年{month}月的結轉紀錄已存在，無法重複執行。', 'danger')
+            return redirect(url_for('petty_cash.accounting_operations'))
+
+        if month_end_balance < 0:
+            flash(f'警告：{year}年{month}月結餘為負 (${month_end_balance})，無法進行結轉。請檢查帳目。', 'warning')
+            return redirect(url_for('petty_cash.accounting_operations'))
+
+        # 建立新的收入交易
+        settlement_transaction = Transaction(
+            transaction_type=TransactionType.INCOME,
+            application_date=date.today(),
+            transaction_date=next_month_date,
+            applicant_name='系統自動作業',
+            description=f'{year}年{month}月 餘額結轉',
+            total_amount=month_end_balance,
+            subtotal=month_end_balance,
+            tax=0,
+            tax_type=TaxType.TAX_EXEMPT,
+            status=ApprovalStatus.APPROVED # 自動作業直接核准
+        )
+        db.session.add(settlement_transaction)
+        db.session.commit()
+
+        flash(f'成功！{year}年{month}月餘額 ${month_end_balance} 已成功結轉至 {next_month_date.strftime("%Y-%m-%d")}。', 'success')
+
+    else:
+        # 如果表單驗證失敗
+        for field, errors in form.errors.items():
+            for error in errors:
+                flash(f'欄位 "{getattr(form, field).label.text}" 發生錯誤: {error}', 'danger')
+
+    return redirect(url_for('petty_cash.accounting_operations'))

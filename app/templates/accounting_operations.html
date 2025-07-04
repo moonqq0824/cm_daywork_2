@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block title %}會計作業{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>會計作業</h2>
+    <p class="text-muted">此處提供特殊的會計處理功能，例如月底結轉作業。</p>
+    <hr>
+
+    <div class="card">
+        <div class="card-header">
+            <h5>每月結餘結轉</h5>
+        </div>
+        <div class="card-body">
+            <p class="card-text">請選擇您要進行結算的月份。系統將會計算該月份的月底餘額，並自動新增一筆次月一日的期初收入紀錄。</p>
+            <form method="POST" action="{{ url_for('petty_cash.settle_month_end') }}" class="row g-3 align-items-end">
+                {{ form.hidden_tag() }}
+                <div class="col-md-4">
+                    {{ form.year.label(class="form-label") }}
+                    {{ form.year(class="form-select") }}
+                </div>
+                <div class="col-md-4">
+                    {{ form.month.label(class="form-label") }}
+                    {{ form.month(class="form-select") }}
+                </div>
+                <div class="col-md-4">
+                    {{ form.submit(class="btn btn-primary w-100") }}
+                </div>
+            </form>
+        </div>
+        <div class="card-footer text-muted">
+            注意：執行結轉前，請務必確認該月份的所有帳目皆已登錄完成。此操作將會產生一筆新的收入紀錄。
+        </div>
+    </div>
+
+</div>
+{% endblock %}

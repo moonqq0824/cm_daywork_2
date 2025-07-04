@@ -1,61 +1,65 @@
-import enum
+from flask_wtf import FlaskForm
+from wtforms import StringField, SubmitField, FieldList, FormField, DecimalField, DateField, SelectField, RadioField
+from wtforms.validators import DataRequired, NumberRange, Optional
+# 這裡只從 models 匯入我們需要用到的 Enum，而不是整個模型
+from .models import TaxType, TaxCalculationMethod
+from wtforms import SelectField
 from datetime import datetime
-from app import db
 
-class TransactionType(enum.Enum):
-    INCOME = '收入'
-    EXPENDITURE = '支出'
+class TransactionItemForm(FlaskForm):
+    """子表單：用於單個明細項目"""
+    class Meta:
+        csrf = False  # 子表單通常不需要獨立的 CSRF 保護
+    item_name = StringField('品名：', validators=[DataRequired()])
+    quantity = DecimalField('數量：', validators=[DataRequired(), NumberRange(min=0)])
+    unit = StringField('單位：')
+    unit_price = DecimalField('單價：', validators=[DataRequired()])
 
-class TaxType(enum.Enum):
-    TAXABLE = '應稅'
-    ZERO_TAX = '零稅率'
-    TAX_EXEMPT = '免稅'
 
-class TaxCalculationMethod(enum.Enum):
-    EXCLUSIVE = '稅外加'
-    INCLUSIVE = '稅內含'
-
-class ApprovalStatus(enum.Enum):
-    DRAFT = '草稿'
-    PENDING = '待簽核'
-    APPROVED = '已核准'
-    REJECTED = '已駁回'
-
-class Transaction(db.Model):
-    __tablename__ = 'transactions'
-
-    id = db.Column(db.Integer, primary_key=True)
-    transaction_type = db.Column(db.Enum(TransactionType), nullable=False)
-    tax_type = db.Column(db.Enum(TaxType), nullable=False, default=TaxType.TAXABLE, server_default=TaxType.TAXABLE.name)
-    tax_calculation_method = db.Column(db.Enum(TaxCalculationMethod), nullable=True)
-    transaction_date = db.Column(db.Date, nullable=False, default=datetime.utcnow)
-    applicant_name = db.Column(db.String(100), nullable=False)
-    description = db.Column(db.String(200), nullable=False)
-    subtotal = db.Column(db.Numeric(precision=10, scale=2), default=0.00)
-    tax = db.Column(db.Numeric(precision=10, scale=2), default=0.00)
-    total_amount = db.Column(db.Numeric(precision=10, scale=2), nullable=False)
+class ExpenditureForm(FlaskForm):
+    """主表單：新增一筆支出"""
+    application_date = DateField('申請日期：', validators=[DataRequired()], format='%Y-%m-%d')
+    erp_document_number = StringField('ERP 單號：', validators=[Optional()])
+    transaction_date = DateField('交易日期：', validators=[DataRequired()], format='%Y-%m-%d')
+    applicant_name = StringField('申請人：', validators=[DataRequired()])
+    description = StringField('摘要：', validators=[DataRequired()])
     
-    erp_document_number = db.Column(db.String(100), nullable=True, comment='ERP對應單號')
-    application_date = db.Column(db.Date, nullable=False, default=datetime.utcnow, comment='申請日期')
-    status = db.Column(db.Enum(ApprovalStatus), nullable=False, default=ApprovalStatus.DRAFT, server_default=ApprovalStatus.DRAFT.name, comment='簽核狀態')
-    approver_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True, comment='簽核主管ID')
-    approval_date = db.Column(db.Date, nullable=True, comment='簽核日期')
+    tax_type = SelectField(
+        '稅別：',
+        choices=[(t.name, t.value) for t in TaxType],
+        validators=[DataRequired()]
+    )
+    tax_calculation_method = RadioField(
+        '計稅方式：',
+        choices=[(t.name, t.value) for t in TaxCalculationMethod],
+        default=TaxCalculationMethod.EXCLUSIVE.name,
+        validators=[Optional()]
+    )
+    items = FieldList(FormField(TransactionItemForm), min_entries=0)
+    submit = SubmitField('新增支出')
 
-    items = db.relationship('TransactionItem', backref='transaction', lazy=True, cascade='all, delete-orphan')
-    approver = db.relationship('User', backref='approved_transactions', foreign_keys=[approver_id])
+class IncomeForm(FlaskForm):
+    """新增一筆收入的表單"""
+    application_date = DateField('申請日期：', validators=[DataRequired()], format='%Y-%m-%d')
+    transaction_date = DateField('交易日期：', validators=[DataRequired()], format='%Y-%m-%d')
+    applicant_name = StringField('經手人/來源：', validators=[DataRequired()])
+    description = StringField('摘要：', validators=[DataRequired()])
+    total_amount = DecimalField('收入金額：', validators=[DataRequired(), NumberRange(min=0)])
+    submit = SubmitField('新增收入')
 
-    def __repr__(self):
-        return f"<Transaction {self.id}: {self.description}>"
-
-class TransactionItem(db.Model):
-    __tablename__ = 'transaction_items'
-    id = db.Column(db.Integer, primary_key=True)
-    item_name = db.Column(db.String(100), nullable=False)
-    quantity = db.Column(db.Numeric(precision=10, scale=2), nullable=False)
-    unit = db.Column(db.String(20), nullable=True)
-    unit_price = db.Column(db.Numeric(precision=10, scale=2), nullable=False)
-    line_total = db.Column(db.Numeric(precision=10, scale=2), nullable=False)
-    transaction_id = db.Column(db.Integer, db.ForeignKey('transactions.id'), nullable=False)
-
-    def __repr__(self):
-        return f"<TransactionItem {self.id}: {self.item_name}>"
+class MonthEndSettlementForm(FlaskForm):
+    """月結作業表單"""
+    current_year = datetime.utcnow().year
+    # 建立從今年到過去五年的年份選項
+    year = SelectField(
+        '年份',
+        choices=[(str(y), f'{y}年') for y in range(current_year, current_year - 5, -1)],
+        validators=[DataRequired()]
+    )
+    # 建立月份選項
+    month = SelectField(
+        '月份',
+        choices=[(str(m), f'{m}月') for m in range(1, 13)],
+        validators=[DataRequired()]
+    )
+    submit = SubmitField('執行結轉')
