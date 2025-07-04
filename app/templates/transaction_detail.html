@@ -7,6 +7,15 @@
         <a href="{{ url_for('petty_cash.index') }}" class="btn btn-secondary me-2">
             <i class="bi bi-arrow-left-circle"></i> 返回列表
         </a>
+        {% if transaction.status == ApprovalStatus.DRAFT and (transaction.applicant_name == current_user.username or
+        current_user.is_manager()) %}
+        <form action="{{ url_for('petty_cash.submit_for_approval', transaction_id=transaction.id) }}" method="POST"
+            class="me-2">
+            <button type="submit" class="btn btn-success">
+                <i class="bi bi-send-check"></i> 提交送審
+            </button>
+        </form>
+        {% endif %}
         {% if transaction.transaction_type == TransactionType.EXPENDITURE %}
         <a href="{{ url_for('petty_cash.edit_transaction', transaction_id=transaction.id) }}"
             class="btn btn-primary me-2">
@@ -122,12 +131,33 @@
             <div class="card-header">
                 <h5>簽核軌跡</h5>
             </div>
-            <div class="card-body text-muted">
-                <div class="d-flex justify-content-between"><span>簽核主管:</span><span>{{ transaction.approver.username if
-                        transaction.approver else '尚未簽核' }}</span></div>
-                <div class="d-flex justify-content-between"><span>簽核日期:</span><span>{{
-                        transaction.approval_date.strftime('%Y-%m-%d') if transaction.approval_date else 'N/A' }}</span>
-                </div>
+            <div class="card-body">
+                <ul class="list-group list-group-flush">
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        <span>申請人</span>
+                        <strong>{{ transaction.applicant_name }}</strong>
+                    </li>
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        <span>申請日期</span>
+                        <span class="text-muted">{{ transaction.application_date.strftime('%Y-%m-%d') }}</span>
+                    </li>
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        <span>簽核主管</span>
+                        {% if transaction.approver %}
+                        <strong>{{ transaction.approver.username }}</strong>
+                        {% else %}
+                        <span class="text-muted">---</span>
+                        {% endif %}
+                    </li>
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        <span>簽核日期</span>
+                        {% if transaction.approval_date %}
+                        <span class="text-muted">{{ transaction.approval_date.strftime('%Y-%m-%d') }}</span>
+                        {% else %}
+                        <span class="text-muted">---</span>
+                        {% endif %}
+                    </li>
+                </ul>
             </div>
         </div>
 

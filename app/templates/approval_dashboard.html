@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% block title %}簽核儀表板{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2>簽核儀表板</h2>
+</div>
+<p class="text-muted">此處將會列出所有等待您簽核的支出申請。</p>
+
+<div class="card">
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>ID</th>
+                        <th>申請日</th>
+                        <th>申請人</th>
+                        <th>摘要</th>
+                        <th class="text-end">金額</th>
+                        <th class="text-center">操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for transaction in transactions.items %}
+                    <tr>
+                        <td>{{ transaction.id }}</td>
+                        <td>{{ transaction.application_date.strftime('%Y-%m-%d') }}</td>
+                        <td>{{ transaction.applicant_name }}</td>
+                        <td>{{ transaction.description }}</td>
+                        <td class="text-end fw-bold text-danger">
+                            {{ "%.2f"|format(transaction.total_amount) }}
+                        </td>
+                        <td class="text-center">
+                            <div class="btn-group" role="group">
+                                <a href="{{ url_for('petty_cash.transaction_detail', transaction_id=transaction.id) }}"
+                                    class="btn btn-sm btn-outline-primary" title="查看詳情">
+                                    <i class="bi bi-search"></i>
+                                </a>
+                                <form method="POST"
+                                    action="{{ url_for('petty_cash.approve_transaction', transaction_id=transaction.id) }}"
+                                    class="d-inline">
+                                    <button type="submit" class="btn btn-sm btn-outline-success" title="同意">
+                                        <i class="bi bi-check-lg"></i>
+                                    </button>
+                                </form>
+                                <form method="POST"
+                                    action="{{ url_for('petty_cash.reject_transaction', transaction_id=transaction.id) }}"
+                                    class="d-inline">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger" title="駁回">
+                                        <i class="bi bi-x-lg"></i>
+                                    </button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="6" class="text-center text-muted">目前沒有任何待簽核的項目。</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+{% if transactions.pages > 1 %}
+<nav aria-label="Page navigation" class="mt-4">
+    <ul class="pagination justify-content-center">
+        <li class="page-item {% if not transactions.has_prev %}disabled{% endif %}">
+            <a class="page-link"
+                href="{{ url_for('petty_cash.approval_dashboard', page=transactions.prev_num) }}">上一頁</a>
+        </li>
+        {% for page_num in transactions.iter_pages() %}
+        <li class="page-item {% if transactions.page == page_num %}active{% endif %}">
+            <a class="page-link" href="{{ url_for('petty_cash.approval_dashboard', page=page_num) }}">{{ page_num }}</a>
+        </li>
+        {% endfor %}
+        <li class="page-item {% if not transactions.has_next %}disabled{% endif %}">
+            <a class="page-link"
+                href="{{ url_for('petty_cash.approval_dashboard', page=transactions.next_num) }}">下一頁</a>
+        </li>
+    </ul>
+</nav>
+{% endif %}
+{% endblock %}

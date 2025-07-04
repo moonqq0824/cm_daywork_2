@@ -6,7 +6,8 @@ from .models import Transaction, TransactionItem, TransactionType, TaxType, TaxC
 from .forms import ExpenditureForm, IncomeForm, MonthEndSettlementForm
 from datetime import date, datetime, timedelta
 from sqlalchemy import func, extract
-import calendar # <--- 加入這個標準函式庫
+from app.modules.user.routes import manager_required
+import calendar 
 
 petty_cash_bp = Blueprint('petty_cash', __name__)
 
@@ -37,7 +38,12 @@ def transaction_detail(transaction_id):
     if not transaction:
         flash('找不到該筆交易。', 'danger')
         return redirect(url_for('petty_cash.index'))
-    return render_template('transaction_detail.html', transaction=transaction, TransactionType=TransactionType)
+    return render_template(
+        'transaction_detail.html', 
+        transaction=transaction, 
+        TransactionType=TransactionType, 
+        ApprovalStatus=ApprovalStatus  # <--- 新增這一行
+    )
 
 @petty_cash_bp.route('/expenditure/add', methods=['GET', 'POST'])
 @login_required
@@ -73,7 +79,7 @@ def add_expenditure():
                 transaction_type=TransactionType.EXPENDITURE,
                 application_date=form.application_date.data,
                 erp_document_number=form.erp_document_number.data,
-                status=ApprovalStatus.PENDING,
+                status=ApprovalStatus.DRAFT,
                 transaction_date=form.transaction_date.data,
                 applicant_name=form.applicant_name.data,
                 description=form.description.data,
@@ -168,7 +174,6 @@ def edit_transaction(transaction_id):
         form.tax_calculation_method.data = transaction.tax_calculation_method.name
             
     return render_template('edit_transaction.html', form=form, transaction_id=transaction_id)
-
 
 @petty_cash_bp.route('/income/add', methods=['GET', 'POST'])
 @login_required
@@ -418,3 +423,97 @@ def cash_count_session_detail(session_id):
         details_map=details_map,
         all_denominations=all_denominations
     )
+
+@petty_cash_bp.route('/approvals')
+@login_required
+@manager_required # 只有主管能存取
+def approval_dashboard():
+    """顯示待簽核儀表板"""
+    page = request.args.get('page', 1, type=int)
+    
+    # 查詢所有狀態為 PENDING 的交易
+    pending_transactions = Transaction.query.filter_by(
+        status=ApprovalStatus.PENDING
+    ).order_by(Transaction.application_date.asc()).paginate(
+        page=page, per_page=15, error_out=False
+    )
+    
+    return render_template('approval_dashboard.html', transactions=pending_transactions)
+
+@petty_cash_bp.route('/transaction/<int:transaction_id>/submit', methods=['POST'])
+@login_required
+def submit_for_approval(transaction_id):
+    """將草稿狀態的交易提交以供審核"""
+    transaction = db.session.get(Transaction, transaction_id)
+    if not transaction:
+        flash('找不到該筆交易。', 'danger')
+        return redirect(url_for('petty_cash.index'))
+
+    # 權限檢查：只有本人或主管可以提交
+    if transaction.applicant_name != current_user.username and not current_user.is_manager():
+         flash('您沒有權限提交此申請。', 'danger')
+         return redirect(url_for('petty_cash.transaction_detail', transaction_id=transaction_id))
+
+    if transaction.status == ApprovalStatus.DRAFT:
+        try:
+            transaction.status = ApprovalStatus.PENDING
+            db.session.commit()
+            flash('支出申請已成功提交，等候主管簽核。', 'success')
+        except Exception as e:
+            db.session.rollback()
+            flash(f'提交失敗，錯誤：{e}', 'danger')
+    else:
+        flash('此交易無法提交，可能已在簽核中或已完成。', 'warning')
+
+    return redirect(url_for('petty_cash.transaction_detail', transaction_id=transaction_id))
+
+@petty_cash_bp.route('/transaction/<int:transaction_id>/approve', methods=['POST'])
+@login_required
+@manager_required
+def approve_transaction(transaction_id):
+    """同意一筆交易申請"""
+    transaction = db.session.get(Transaction, transaction_id)
+    if not transaction:
+        flash('找不到該筆交易。', 'danger')
+        return redirect(url_for('petty_cash.approval_dashboard'))
+
+    if transaction.status == ApprovalStatus.PENDING:
+        try:
+            transaction.status = ApprovalStatus.APPROVED
+            transaction.approver_id = current_user.id
+            transaction.approval_date = datetime.utcnow()
+            db.session.commit()
+            flash(f'交易 ID: {transaction.id} 已核准。', 'success')
+        except Exception as e:
+            db.session.rollback()
+            flash(f'處理時發生錯誤：{e}', 'danger')
+    else:
+        flash('此交易不是待簽核狀態，無法操作。', 'warning')
+        
+    return redirect(url_for('petty_cash.approval_dashboard'))
+
+
+@petty_cash_bp.route('/transaction/<int:transaction_id>/reject', methods=['POST'])
+@login_required
+@manager_required
+def reject_transaction(transaction_id):
+    """駁回一筆交易申請"""
+    transaction = db.session.get(Transaction, transaction_id)
+    if not transaction:
+        flash('找不到該筆交易。', 'danger')
+        return redirect(url_for('petty_cash.approval_dashboard'))
+
+    if transaction.status == ApprovalStatus.PENDING:
+        try:
+            transaction.status = ApprovalStatus.REJECTED
+            transaction.approver_id = current_user.id
+            transaction.approval_date = datetime.utcnow()
+            db.session.commit()
+            flash(f'交易 ID: {transaction.id} 已駁回。', 'danger')
+        except Exception as e:
+            db.session.rollback()
+            flash(f'處理時發生錯誤：{e}', 'danger')
+    else:
+        flash('此交易不是待簽核狀態，無法操作。', 'warning')
+        
+    return redirect(url_for('petty_cash.approval_dashboard'))
