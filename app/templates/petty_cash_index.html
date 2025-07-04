@@ -36,7 +36,7 @@
                         <th>申請人</th>
                         <th class="text-end">金額</th>
                         <th>狀態</th>
-                        <th>操作</th>
+                        <th class="text-center">操作</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -67,11 +67,32 @@
                                 {{ transaction.status.value }}
                             </span>
                         </td>
-                        <td>
-                            <a href="{{ url_for('petty_cash.transaction_detail', transaction_id=transaction.id) }}"
-                                class="btn btn-sm btn-outline-primary">
-                                <i class="bi bi-search"></i> 詳情
-                            </a>
+                        <td class="text-center">
+                            <div class="btn-group" role="group">
+                                <a href="{{ url_for('petty_cash.transaction_detail', transaction_id=transaction.id) }}"
+                                    class="btn btn-sm btn-outline-primary" title="查看詳情">
+                                    <i class="bi bi-search"></i>
+                                </a>
+
+                                {% if transaction.status == ApprovalStatus.DRAFT or current_user.is_manager() %}
+                                {% if transaction.transaction_type == TransactionType.EXPENDITURE %}
+                                <a href="{{ url_for('petty_cash.edit_transaction', transaction_id=transaction.id) }}"
+                                    class="btn btn-sm btn-outline-secondary" title="編輯">
+                                    <i class="bi bi-pencil-fill"></i>
+                                </a>
+                                {% else %}
+                                <a href="{{ url_for('petty_cash.edit_income', transaction_id=transaction.id) }}"
+                                    class="btn btn-sm btn-outline-secondary" title="編輯">
+                                    <i class="bi bi-pencil-fill"></i>
+                                </a>
+                                {% endif %}
+
+                                <button type="button" class="btn btn-sm btn-outline-danger" data-bs-toggle="modal"
+                                    data-bs-target="#deleteModal" data-bs-id="{{ transaction.id }}" title="刪除">
+                                    <i class="bi bi-trash3-fill"></i>
+                                </button>
+                                {% endif %}
+                            </div>
                         </td>
                     </tr>
                     {% else %}
@@ -85,34 +106,60 @@
     </div>
 </div>
 
-<nav aria-label="Page navigation">
+<nav aria-label="Page navigation" class="mt-4">
     <ul class="pagination justify-content-center">
-        {% if transactions.has_prev %}
-        <li class="page-item"><a class="page-link"
-                href="{{ url_for('petty_cash.index', page=transactions.prev_num) }}">&laquo; 上一頁</a></li>
-        {% else %}
-        <li class="page-item disabled"><span class="page-link">&laquo; 上一頁</span></li>
-        {% endif %}
-
-        {% for page_num in transactions.iter_pages() %}
+        <li class="page-item {% if not transactions.has_prev %}disabled{% endif %}">
+            <a class="page-link" href="{{ url_for('petty_cash.index', page=transactions.prev_num) }}">上一頁</a>
+        </li>
+        {% for page_num in transactions.iter_pages(left_edge=2, right_edge=2, left_current=2, right_current=2) %}
         {% if page_num %}
-        {% if transactions.page == page_num %}
-        <li class="page-item active"><a class="page-link" href="#">{{ page_num }}</a></li>
-        {% else %}
-        <li class="page-item"><a class="page-link" href="{{ url_for('petty_cash.index', page=page_num) }}">{{ page_num
-                }}</a></li>
-        {% endif %}
+        <li class="page-item {% if transactions.page == page_num %}active{% endif %}">
+            <a class="page-link" href="{{ url_for('petty_cash.index', page=page_num) }}">{{ page_num }}</a>
+        </li>
         {% else %}
         <li class="page-item disabled"><span class="page-link">...</span></li>
         {% endif %}
         {% endfor %}
-
-        {% if transactions.has_next %}
-        <li class="page-item"><a class="page-link"
-                href="{{ url_for('petty_cash.index', page=transactions.next_num) }}">下一頁 &raquo;</a></li>
-        {% else %}
-        <li class="page-item disabled"><span class="page-link">下一頁 &raquo;</span></li>
-        {% endif %}
+        <li class="page-item {% if not transactions.has_next %}disabled{% endif %}">
+            <a class="page-link" href="{{ url_for('petty_cash.index', page=transactions.next_num) }}">下一頁</a>
+        </li>
     </ul>
 </nav>
+
+<div class="modal fade" id="deleteModal" tabindex="-1" aria-labelledby="deleteModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="deleteModalLabel">確認刪除</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                您確定要刪除這筆交易紀錄嗎？此操作無法復原。
+            </div>
+            <div class="modal-footer">
+                <form id="deleteForm" method="POST" action="">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-danger">確認刪除</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        var deleteModal = document.getElementById('deleteModal');
+        if (deleteModal) {
+            deleteModal.addEventListener('show.bs.modal', function (event) {
+                var button = event.relatedTarget;
+                var transactionId = button.getAttribute('data-bs-id');
+                var deleteForm = document.getElementById('deleteForm');
+                deleteForm.action = '/transaction/' + transactionId + '/delete';
+            });
+        }
+    });
+</script>
 {% endblock %}

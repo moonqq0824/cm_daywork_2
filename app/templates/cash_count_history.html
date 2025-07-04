@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+
+{% block title %}盤點歷史紀錄{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2>盤點歷史紀錄</h2>
+    <a href="{{ url_for('petty_cash.accounting_operations') }}" class="btn btn-secondary">
+        <i class="bi bi-arrow-left-circle"></i> 返回會計作業
+    </a>
+</div>
+<p class="text-muted">此處將會列出所有已儲存的現金盤點作業紀錄。</p>
+
+<div class="card">
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>ID</th>
+                        <th>盤點日期</th>
+                        <th>操作人員</th>
+                        <th class="text-end">盤點金額</th>
+                        <th class="text-end">系統餘額</th>
+                        <th class="text-end">差額</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for session in sessions.items %}
+                    <tr>
+                        <td>{{ session.id }}</td>
+                        <td>{{ session.count_date.strftime('%Y-%m-%d %H:%M') }}</td>
+                        <td>{{ session.user.username }}</td>
+                        <td class="text-end">${{ "%.0f"|format(session.counted_total) }}</td>
+                        <td class="text-end">${{ "%.0f"|format(session.system_balance) }}</td>
+                        <td class="text-end {% if session.difference != 0 %}text-danger fw-bold{% endif %}">
+                            ${{ "%.0f"|format(session.difference) }}
+                        </td>
+                        <td>
+                            <a href="{{ url_for('petty_cash.cash_count_session_detail', session_id=session.id) }}"
+                                class="btn btn-sm btn-outline-primary">
+                                <i class="bi bi-search"></i> 查看詳情
+                            </a>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="7" class="text-center text-muted">目前沒有任何盤點紀錄。</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+{% if sessions.pages > 1 %}
+<nav aria-label="Page navigation" class="mt-4">
+    <ul class="pagination justify-content-center">
+        <li class="page-item {% if not sessions.has_prev %}disabled{% endif %}">
+            <a class="page-link" href="{{ url_for('petty_cash.cash_count_history', page=sessions.prev_num) }}">上一頁</a>
+        </li>
+        {% for page_num in sessions.iter_pages() %}
+        {% if page_num %}
+        <li class="page-item {% if sessions.page == page_num %}active{% endif %}">
+            <a class="page-link" href="{{ url_for('petty_cash.cash_count_history', page=page_num) }}">{{ page_num }}</a>
+        </li>
+        {% else %}
+        <li class="page-item disabled"><span class="page-link">...</span></li>
+        {% endif %}
+        {% endfor %}
+        <li class="page-item {% if not sessions.has_next %}disabled{% endif %}">
+            <a class="page-link" href="{{ url_for('petty_cash.cash_count_history', page=sessions.next_num) }}">下一頁</a>
+        </li>
+    </ul>
+</nav>
+{% endif %}
+
+{% endblock %}

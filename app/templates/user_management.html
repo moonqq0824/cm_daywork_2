@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+
+{% block title %}使用者管理{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2>使用者管理</h2>
+</div>
+<p class="text-muted">此處將會列出系統中的所有使用者，您可以指派他們的角色。</p>
+
+<div class="card">
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>ID</th>
+                        <th>使用者名稱</th>
+                        <th>Email</th>
+                        <th>目前角色</th>
+                        <th class="text-center">操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for user in users.items %}
+                    <tr>
+                        <td>{{ user.id }}</td>
+                        <td>{{ user.username }}</td>
+                        <td>{{ user.email }}</td>
+                        <td>
+                            <span
+                                class="badge {% if user.is_manager() %}bg-info{% else %}bg-light text-dark{% endif %}">
+                                {{ user.role.value }}
+                            </span>
+                        </td>
+                        <td class="text-center">
+                            {% if user.id != current_user.id %}
+                            <form method="POST" action="{{ url_for('user.set_user_role', user_id=user.id) }}"
+                                class="d-inline">
+                                {% if user.is_manager() %}
+                                <button type="submit" name="role" value="USER"
+                                    class="btn btn-sm btn-outline-secondary">降為一般使用者</button>
+                                {% else %}
+                                <button type="submit" name="role" value="MANAGER"
+                                    class="btn btn-sm btn-info">升為主管</button>
+                                {% endif %}
+                            </form>
+                            {% else %}
+                            <small class="text-muted">(無法變更自己)</small>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="5" class="text-center text-muted">系統中沒有其他使用者。</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+{% if users.pages > 1 %}
+<nav aria-label="Page navigation" class="mt-4">
+    <ul class="pagination justify-content-center">
+        <li class="page-item {% if not users.has_prev %}disabled{% endif %}">
+            <a class="page-link" href="{{ url_for('user.user_management', page=users.prev_num) }}">上一頁</a>
+        </li>
+        {% for page_num in users.iter_pages() %}
+        {% if page_num %}
+        <li class="page-item {% if users.page == page_num %}active{% endif %}">
+            <a class="page-link" href="{{ url_for('user.user_management', page=page_num) }}">{{ page_num }}</a>
+        </li>
+        {% else %}
+        <li class="page-item disabled"><span class="page-link">...</span></li>
+        {% endif %}
+        {% endfor %}
+        <li class="page-item {% if not users.has_next %}disabled{% endif %}">
+            <a class="page-link" href="{{ url_for('user.user_management', page=users.next_num) }}">下一頁</a>
+        </li>
+    </ul>
+</nav>
+{% endif %}
+
+{% endblock %}

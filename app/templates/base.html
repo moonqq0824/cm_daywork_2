@@ -32,11 +32,20 @@
                     <li class="nav-item">
                         <a class="nav-link" href="{{ url_for('petty_cash.accounting_operations') }}">會計作業</a>
                     </li>
+
+                    {% if current_user.is_manager() %}
                     <li class="nav-item">
-                        <span class="navbar-text me-3">歡迎, {{ current_user.username }}</span>
+                        <a class="nav-link" href="{{ url_for('user.user_management') }}">使用者管理</a>
                     </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('user.logout') }}">登出</a>
+                    {% endif %}
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button"
+                            data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="bi bi-person-circle"></i> 歡迎, {{ current_user.username }}
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="navbarDropdown">
+                            <li><a class="dropdown-item" href="{{ url_for('user.logout') }}">登出</a></li>
+                        </ul>
                     </li>
                     {% else %}
                     <li class="nav-item">

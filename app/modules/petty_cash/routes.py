@@ -15,14 +15,20 @@ petty_cash_bp = Blueprint('petty_cash', __name__)
 def index():
     page = request.args.get('page', 1, type=int)
     transactions_query = Transaction.query.order_by(Transaction.transaction_date.desc(), Transaction.id.desc())
-    transactions = transactions_query.paginate(page=page, per_page=10)
+    transactions = transactions_query.paginate(page=page, per_page=10, error_out=False)
     
-    # 計算總餘額
+    # 使用我們舊的、簡單的總餘額計算方式
     total_income = db.session.query(func.sum(Transaction.total_amount)).filter(Transaction.transaction_type == TransactionType.INCOME).scalar() or Decimal('0.0')
     total_expenditure = db.session.query(func.sum(Transaction.total_amount)).filter(Transaction.transaction_type == TransactionType.EXPENDITURE).scalar() or Decimal('0.0')
-    balance = total_income + total_expenditure  # 支出為負數，所以用加法
+    balance = total_income + total_expenditure
 
-    return render_template('petty_cash_index.html', transactions=transactions, balance=balance, TransactionType=TransactionType)
+    return render_template(
+        'petty_cash_index.html', 
+        transactions=transactions, 
+        balance=balance, # 只傳遞 balance 這一個金額變數
+        TransactionType=TransactionType,
+        ApprovalStatus=ApprovalStatus # <-- 我們需要這個來做權限判斷
+    )
 
 @petty_cash_bp.route('/transaction/<int:transaction_id>')
 @login_required
@@ -67,7 +73,7 @@ def add_expenditure():
                 transaction_type=TransactionType.EXPENDITURE,
                 application_date=form.application_date.data,
                 erp_document_number=form.erp_document_number.data,
-                status=ApprovalStatus.DRAFT,
+                status=ApprovalStatus.PENDING,
                 transaction_date=form.transaction_date.data,
                 applicant_name=form.applicant_name.data,
                 description=form.description.data,
@@ -102,6 +108,10 @@ def edit_transaction(transaction_id):
     if not transaction or transaction.transaction_type != TransactionType.EXPENDITURE:
         flash('找不到該筆支出紀錄。', 'danger')
         return redirect(url_for('petty_cash.index'))
+    
+    if transaction.status != ApprovalStatus.DRAFT and not current_user.is_manager():
+        flash('此申請已送出，無法編輯。', 'warning')
+        return redirect(url_for('petty_cash.transaction_detail', transaction_id=transaction_id))
     
     form = ExpenditureForm(obj=transaction)
 
@@ -226,6 +236,11 @@ def delete_transaction(transaction_id):
     if not transaction:
         flash('找不到該筆交易。', 'danger')
         return redirect(url_for('petty_cash.index'))
+    
+    if transaction.status != ApprovalStatus.DRAFT and not current_user.is_manager():
+        flash('此申請已送出，無法刪除。', 'warning')
+        return redirect(url_for('petty_cash.transaction_detail', transaction_id=transaction_id))
+
     try:
         db.session.delete(transaction)
         db.session.commit()
@@ -339,7 +354,6 @@ def cash_count_tool():
 def save_cash_count():
     """儲存現金盤點紀錄"""
     try:
-        # 建立一筆新的盤點主表紀錄
         session = CashCountSession(
             counted_total=Decimal(request.form.get('counted_total', 0)),
             system_balance=Decimal(request.form.get('system_balance', 0)),
@@ -349,15 +363,18 @@ def save_cash_count():
         db.session.add(session)
         
         denominations = [1000, 500, 100, 50, 10, 5, 1]
-        # 處理盤點明細
         for denom in denominations:
-            count = int(request.form.get(f'count_{denom}', 0))
+            # --- ▼▼▼ 這是修正的地方 ▼▼▼ ---
+            # request.form.get(...) or 0 能確保在收到空字串''時，會用 0 來代替
+            count = int(request.form.get(f'count_{denom}') or 0)
+            # --- ▲▲▲ 修正結束 ▲▲▲ ---
+
             if count > 0:
                 detail = CashCountDetail(
                     denomination=denom,
                     quantity=count,
                     subtotal=Decimal(denom * count),
-                    session=session  # 這裡會自動關聯到主表
+                    session=session
                 )
                 db.session.add(detail)
 
@@ -366,6 +383,38 @@ def save_cash_count():
 
     except Exception as e:
         db.session.rollback()
-        flash(f'儲存盤-點紀錄時發生錯誤：{e}', 'danger')
+        flash(f'儲存盤點紀錄時發生錯誤：{e}', 'danger')
 
     return redirect(url_for('petty_cash.cash_count_tool'))
+
+@petty_cash_bp.route('/accounting/cash_count_history')
+@login_required
+def cash_count_history():
+    """顯示現金盤點的歷史紀錄列表"""
+    page = request.args.get('page', 1, type=int)
+    
+    # 查詢所有的盤點主表紀錄，並依日期排序
+    sessions = CashCountSession.query.order_by(CashCountSession.count_date.desc()).paginate(
+        page=page, per_page=15, error_out=False
+    )
+    return render_template('cash_count_history.html', sessions=sessions)
+
+@petty_cash_bp.route('/accounting/cash_count_history/<int:session_id>')
+@login_required
+def cash_count_session_detail(session_id):
+    """顯示單次現金盤點的詳情"""
+    # 使用 get_or_404 可以更優雅地處理找不到紀錄的情況
+    session = CashCountSession.query.get_or_404(session_id)
+    
+    # 將盤點明細轉換為字典，方便模板處理
+    details_map = {detail.denomination: detail for detail in session.details}
+    
+    # 定義所有可能的面額，以確保模板中能完整顯示
+    all_denominations = [1000, 500, 100, 50, 10, 5, 1]
+    
+    return render_template(
+        'cash_count_session_detail.html', 
+        session=session, 
+        details_map=details_map,
+        all_denominations=all_denominations
+    )

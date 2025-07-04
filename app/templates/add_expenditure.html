@@ -6,9 +6,6 @@
 <div class="container mt-4">
     <div class="d-flex justify-content-between align-items-center">
         <h2>新增支出紀錄</h2>
-        <a href="{{ url_for('petty_cash.index') }}" class="btn btn-secondary">
-            <i class="bi bi-x-lg"></i> 取消
-        </a>
     </div>
     <hr>
     <form method="POST" action="" id="expenditure-form" novalidate>
@@ -28,7 +25,6 @@
                 {{ form.erp_document_number(class="form-control") }}
             </div>
         </div>
-
         <div class="row mb-3">
             <div class="col-md-6">
                 {{ form.applicant_name.label(class="form-label") }}
@@ -43,9 +39,9 @@
         <div class="row mb-3 align-items-end">
             <div class="col-md-4">
                 {{ form.tax_type.label(class="form-label") }}
-                {{ form.tax_type(class="form-select") }}
+                {{ form.tax_type(class="form-select", id="tax_type_select") }}
             </div>
-            <div class="col-md-8">
+            <div class="col-md-8" id="tax_calculation_method_div" style="display: none;">
                 {{ form.tax_calculation_method.label(class="form-label mb-2") }}
                 <div>
                     {% for subfield in form.tax_calculation_method %}
@@ -61,29 +57,52 @@
         <hr>
 
         <h4>項目明細</h4>
-        <div id="items-container">
+        <div class="row gx-2 text-muted small mb-1">
+            <div class="col-md-3">品名</div>
+            <div class="col-md-2">數量</div>
+            <div class="col-md-2">單位</div>
+            <div class="col-md-2">單價</div>
+            <div class="col-md-2">小計（自動計算）</div>
+            <div class="col-md-1"></div>
         </div>
+        <div id="items-container"></div>
         <button type="button" id="add-item" class="btn btn-outline-success mt-2">
             <i class="bi bi-plus-circle"></i> 新增一項明細
         </button>
 
         <hr>
+
+        <div class="row justify-content-end">
+            <div class="col-lg-5">
+                <dl class="row text-end">
+                    <dt class="col-sm-6">銷售額 (未稅)</dt>
+                    <dd class="col-sm-6" id="display-subtotal">$ 0</dd>
+                    <dt class="col-sm-6">稅額</dt>
+                    <dd class="col-sm-6" id="display-tax">$ 0</dd>
+                    <dt class="col-sm-6 fs-5">總金額</dt>
+                    <dd class="col-sm-6 fs-5 fw-bold" id="display-total">$ 0</dd>
+                </dl>
+            </div>
+        </div>
+
+        <hr>
+
         <div class="d-grid gap-2 d-md-flex justify-content-md-end">
+            <a href="{{ url_for('petty_cash.index') }}" class="btn btn-secondary btn-lg">取消</a>
             {{ form.submit(class="btn btn-primary btn-lg") }}
         </div>
     </form>
 </div>
 
 <div id="item-template" style="display: none;">
-    <div class="row item-row mb-2 align-items-center">
-        <div class="col-md-4"><input type="text" name="items-__prefix__-item_name" class="form-control"
-                placeholder="品名"></div>
-        <div class="col-md-2"><input type="number" step="any" name="items-__prefix__-quantity" class="form-control"
-                placeholder="數量"></div>
-        <div class="col-md-2"><input type="text" name="items-__prefix__-unit" class="form-control"
-                placeholder="單位 (個/張)"></div>
-        <div class="col-md-3"><input type="number" step="any" name="items-__prefix__-unit_price" class="form-control"
-                placeholder="單價"></div>
+    <div class="row gx-2 item-row mb-2 align-items-center">
+        <div class="col-md-3"><input type="text" name="items-__prefix__-item_name" class="form-control item-name"></div>
+        <div class="col-md-2"><input type="number" step="any" name="items-__prefix__-quantity"
+                class="form-control item-quantity"></div>
+        <div class="col-md-2"><input type="text" name="items-__prefix__-unit" class="form-control item-unit"></div>
+        <div class="col-md-2"><input type="number" step="any" name="items-__prefix__-unit_price"
+                class="form-control item-unit_price"></div>
+        <div class="col-md-2"><input type="text" class="form-control item-subtotal text-end" readonly></div>
         <div class="col-md-1"><button type="button" class="btn btn-danger remove-item"><i
                     class="bi bi-x-circle"></i></button></div>
     </div>
@@ -94,25 +113,66 @@
 {{ super() }}
 <script>
     document.addEventListener('DOMContentLoaded', function () {
-        function addNewItem() {
-            let index = document.querySelectorAll('.item-row').length;
-            let template = document.getElementById('item-template').innerHTML;
-            let newRow = template.replace(/__prefix__/g, index);
-            document.getElementById('items-container').insertAdjacentHTML('beforeend', newRow);
+        const itemsContainer = document.getElementById('items-container');
+        const taxTypeSelect = document.getElementById('tax_type_select');
+        const taxCalcMethodDiv = document.getElementById('tax_calculation_method_div');
+        const displaySubtotal = document.getElementById('display-subtotal');
+        const displayTax = document.getElementById('display-tax');
+        const displayTotal = document.getElementById('display-total');
+
+        function calculateAll() {
+            let baseAmount = 0;
+
+            document.querySelectorAll('.item-row').forEach(row => {
+                const quantity = parseFloat(row.querySelector('.item-quantity').value) || 0;
+                const unitPrice = parseFloat(row.querySelector('.item-unit_price').value) || 0;
+                const subtotal = quantity * unitPrice;
+                // 將計算結果設定到唯讀的 input 欄位中
+                row.querySelector('.item-subtotal').value = '$ ' + subtotal.toLocaleString();
+                baseAmount += subtotal;
+            });
+
+            const taxType = taxTypeSelect.value;
+            const taxCalcMethod = document.querySelector('input[name="tax_calculation_method"]:checked')?.value;
+            let finalSubtotal = 0, finalTax = 0, finalTotal = 0;
+
+            if (taxType === 'TAXABLE') {
+                const taxRate = 0.05;
+                if (taxCalcMethod === 'EXCLUSIVE') {
+                    finalSubtotal = baseAmount;
+                    finalTax = Math.round(finalSubtotal * taxRate);
+                    finalTotal = finalSubtotal + finalTax;
+                } else if (taxCalcMethod === 'INCLUSIVE') {
+                    finalTotal = baseAmount;
+                    finalSubtotal = Math.round(finalTotal / (1 + taxRate));
+                    finalTax = finalTotal - finalSubtotal;
+                } else {
+                    finalSubtotal = baseAmount;
+                }
+            } else {
+                finalSubtotal = baseAmount;
+            }
+            finalTotal = finalSubtotal + finalTax;
+
+            displaySubtotal.textContent = '$ ' + finalSubtotal.toLocaleString();
+            displayTax.textContent = '$ ' + finalTax.toLocaleString();
+            displayTotal.textContent = '$ ' + finalTotal.toLocaleString();
         }
 
-        document.getElementById('add-item').addEventListener('click', addNewItem);
+        function toggleTaxCalculationMethod() {
+            taxCalcMethodDiv.style.display = taxTypeSelect.value === 'TAXABLE' ? 'block' : 'none';
+            calculateAll();
+        }
 
-        document.getElementById('items-container').addEventListener('click', function (e) {
-            if (e.target && e.target.closest('.remove-item')) {
-                e.target.closest('.item-row').remove();
-                updateIndices();
-            }
-        });
+        function addNewItem() {
+            let index = itemsContainer.querySelectorAll('.item-row').length;
+            let template = document.getElementById('item-template').innerHTML;
+            let newRow = template.replace(/__prefix__/g, index);
+            itemsContainer.insertAdjacentHTML('beforeend', newRow);
+        }
 
         function updateIndices() {
-            let rows = document.querySelectorAll('.item-row');
-            rows.forEach((row, index) => {
+            itemsContainer.querySelectorAll('.item-row').forEach((row, index) => {
                 row.querySelectorAll('input, select').forEach(input => {
                     if (input.name) {
                         input.name = input.name.replace(/items-\d+-/, 'items-' + index + '-');
@@ -120,7 +180,25 @@
                 });
             });
         }
-        addNewItem(); // 預設載入時就新增一筆
+
+        document.getElementById('add-item').addEventListener('click', addNewItem);
+        itemsContainer.addEventListener('input', e => {
+            if (e.target.classList.contains('item-quantity') || e.target.classList.contains('item-unit_price')) {
+                calculateAll();
+            }
+        });
+        itemsContainer.addEventListener('click', e => {
+            if (e.target.closest('.remove-item')) {
+                e.target.closest('.item-row').remove();
+                updateIndices();
+                calculateAll();
+            }
+        });
+        taxTypeSelect.addEventListener('change', toggleTaxCalculationMethod);
+        document.querySelectorAll('input[name="tax_calculation_method"]').forEach(radio => radio.addEventListener('change', calculateAll));
+
+        addNewItem();
+        toggleTaxCalculationMethod();
     });
 </script>
 {% endblock %}
