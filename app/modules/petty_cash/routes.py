@@ -18,17 +18,41 @@ def index():
     transactions_query = Transaction.query.order_by(Transaction.transaction_date.desc(), Transaction.id.desc())
     transactions = transactions_query.paginate(page=page, per_page=10, error_out=False)
     
-    # 使用我們舊的、簡單的總餘額計算方式
-    total_income = db.session.query(func.sum(Transaction.total_amount)).filter(Transaction.transaction_type == TransactionType.INCOME).scalar() or Decimal('0.0')
-    total_expenditure = db.session.query(func.sum(Transaction.total_amount)).filter(Transaction.transaction_type == TransactionType.EXPENDITURE).scalar() or Decimal('0.0')
-    balance = total_income + total_expenditure
+    # --- 最新的、與結轉功能完全同步的餘額計算邏輯 ---
+    
+    # 1. 找到最新的一筆結轉紀錄 (這次是全局尋找，沒有日期限制)
+    latest_settlement = Transaction.query.filter(
+        Transaction.description.like('%餘額結轉%')
+    ).order_by(Transaction.transaction_date.desc()).first()
+
+    # 2. 決定計算的起始點（期初餘額）
+    balance = Decimal('0.0')
+    start_date = date(1900, 1, 1) # 預設一個很早的日期
+    if latest_settlement:
+        balance = latest_settlement.total_amount
+        start_date = latest_settlement.transaction_date
+
+    # 3. 計算從「起始點」到「今天」為止，所有新發生的收支
+    income_since_start = db.session.query(func.sum(Transaction.total_amount)).filter(
+        Transaction.transaction_type == TransactionType.INCOME,
+        Transaction.transaction_date > start_date,
+        ~Transaction.description.like('%餘額結轉%') # 計算時要排除結轉本身的金額
+    ).scalar() or Decimal('0.0')
+
+    expenditure_since_start = db.session.query(func.sum(Transaction.total_amount)).filter(
+        Transaction.transaction_type == TransactionType.EXPENDITURE,
+        Transaction.transaction_date > start_date
+    ).scalar() or Decimal('0.0')
+
+    # 4. 得到最終正確的目前餘額
+    current_balance = balance + income_since_start + expenditure_since_start
 
     return render_template(
         'petty_cash_index.html', 
         transactions=transactions, 
-        balance=balance, # 只傳遞 balance 這一個金額變數
+        balance=current_balance, # 傳遞修正後的餘額
         TransactionType=TransactionType,
-        ApprovalStatus=ApprovalStatus # <-- 我們需要這個來做權限判斷
+        ApprovalStatus=ApprovalStatus
     )
 
 @petty_cash_bp.route('/transaction/<int:transaction_id>')
@@ -52,6 +76,7 @@ def add_expenditure():
     if request.method == 'GET':
         form.application_date.data = date.today()
         form.transaction_date.data = date.today()
+        form.applicant_name.data = current_user.display_name
 
     if form.validate_on_submit():
         try:
@@ -81,7 +106,7 @@ def add_expenditure():
                 erp_document_number=form.erp_document_number.data,
                 status=ApprovalStatus.DRAFT,
                 transaction_date=form.transaction_date.data,
-                applicant_name=form.applicant_name.data,
+                applicant_id=current_user.id,
                 description=form.description.data,
                 tax_type=TaxType[tax_type_str],
                 tax_calculation_method=TaxCalculationMethod[tax_calc_method_str] if tax_calc_method_str else None,
@@ -172,11 +197,20 @@ def edit_transaction(transaction_id):
     form.tax_type.data = transaction.tax_type.name
     if transaction.tax_calculation_method:
         form.tax_calculation_method.data = transaction.tax_calculation_method.name
-            
+
+    # 手動填充 Enum 類型的值
+    form.tax_type.data = transaction.tax_type.name
+    if transaction.tax_calculation_method:
+        form.tax_calculation_method.data = transaction.tax_calculation_method.name
+
+    # 手動填充申請人姓名
+    form.applicant_name.data = transaction.applicant.display_name
+
     return render_template('edit_transaction.html', form=form, transaction_id=transaction_id)
 
 @petty_cash_bp.route('/income/add', methods=['GET', 'POST'])
 @login_required
+@manager_required
 def add_income():
     form = IncomeForm()
     if request.method == 'GET':
@@ -189,7 +223,7 @@ def add_income():
                 transaction_type=TransactionType.INCOME,
                 application_date=form.application_date.data,
                 transaction_date=form.transaction_date.data,
-                applicant_name=form.applicant_name.data,
+                applicant_id=current_user.id,
                 description=form.description.data,
                 total_amount=form.total_amount.data,
                 subtotal=form.total_amount.data,
@@ -208,6 +242,7 @@ def add_income():
 
 @petty_cash_bp.route('/income/<int:transaction_id>/edit', methods=['GET', 'POST'])
 @login_required
+@manager_required
 def edit_income(transaction_id):
     transaction = db.session.get(Transaction, transaction_id)
     if not transaction or transaction.transaction_type != TransactionType.INCOME:
@@ -278,35 +313,38 @@ def settle_month_end():
         year = int(form.year.data)
         month = int(form.month.data)
 
-        # 1. 計算指定月份的期末餘額
-        # 取得該月最後一天
+        # --- ▼▼▼ 全新的、更穩健的月底餘額計算邏輯 ▼▼▼ ---
+
+        # 1. 定義要計算的目標月份的結束日期
         _, last_day = calendar.monthrange(year, month)
         end_date = date(year, month, last_day)
 
-        # 計算到該月底為止的所有收入和支出
+        # 2. 計算從古至今，到該月底為止的所有收入總額
         total_income = db.session.query(func.sum(Transaction.total_amount)).filter(
             Transaction.transaction_type == TransactionType.INCOME,
             Transaction.transaction_date <= end_date
         ).scalar() or Decimal('0.0')
 
+        # 3. 計算從古至今，到該月底為止的所有支出總額
         total_expenditure = db.session.query(func.sum(Transaction.total_amount)).filter(
             Transaction.transaction_type == TransactionType.EXPENDITURE,
             Transaction.transaction_date <= end_date
         ).scalar() or Decimal('0.0')
-        
+
+        # 4. 直接加總，得到最準確的月底餘額
         month_end_balance = total_income + total_expenditure
 
-        # 2. 新增次月一號的期初餘額紀錄
-        # 計算次月一號的日期
+        # --- ▲▲▲ 計算邏輯結束 ▲▲▲ ---
+
+        # 檢查是否已存在該筆結轉紀錄，避免重複執行 (後續邏輯不變)
         if month == 12:
             next_month_date = date(year + 1, 1, 1)
         else:
             next_month_date = date(year, month + 1, 1)
 
-        # 檢查是否已存在該筆結轉紀錄，避免重複執行
         existing_settlement = Transaction.query.filter_by(
             transaction_date=next_month_date,
-            description=f'{year}年{month}月 餘額結轉'
+            description=f"[{current_user.display_name}] 執行 {year}年{month}月 結餘結轉",
         ).first()
 
         if existing_settlement:
@@ -317,26 +355,23 @@ def settle_month_end():
             flash(f'警告：{year}年{month}月結餘為負 (${month_end_balance})，無法進行結轉。請檢查帳目。', 'warning')
             return redirect(url_for('petty_cash.accounting_operations'))
 
-        # 建立新的收入交易
         settlement_transaction = Transaction(
             transaction_type=TransactionType.INCOME,
             application_date=date.today(),
             transaction_date=next_month_date,
-            applicant_name='系統自動作業',
-            description=f'{year}年{month}月 餘額結轉',
+            applicant_id=current_user.id,
+            description=f"[{current_user.display_name}] 執行 {year}年{month}月 結餘結轉",
             total_amount=month_end_balance,
             subtotal=month_end_balance,
             tax=0,
             tax_type=TaxType.TAX_EXEMPT,
-            status=ApprovalStatus.APPROVED # 自動作業直接核准
+            status=ApprovalStatus.APPROVED
         )
         db.session.add(settlement_transaction)
         db.session.commit()
 
         flash(f'成功！{year}年{month}月餘額 ${month_end_balance} 已成功結轉至 {next_month_date.strftime("%Y-%m-%d")}。', 'success')
-
     else:
-        # 如果表單驗證失敗
         for field, errors in form.errors.items():
             for error in errors:
                 flash(f'欄位 "{getattr(form, field).label.text}" 發生錯誤: {error}', 'danger')
@@ -450,7 +485,7 @@ def submit_for_approval(transaction_id):
         return redirect(url_for('petty_cash.index'))
 
     # 權限檢查：只有本人或主管可以提交
-    if transaction.applicant_name != current_user.username and not current_user.is_manager():
+    if transaction.applicant_id != current_user.id and not current_user.is_manager():
          flash('您沒有權限提交此申請。', 'danger')
          return redirect(url_for('petty_cash.transaction_detail', transaction_id=transaction_id))
 

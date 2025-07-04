@@ -24,17 +24,17 @@ def login():
     
     form = LoginForm()
     if form.validate_on_submit():
-        user = User.query.filter_by(username=form.username.data).first()
+        # ▼▼▼ 修改查詢邏輯 ▼▼▼
+        user = User.query.filter_by(account_id=form.account_id.data).first()
         if user is None or not user.check_password(form.password.data):
-            flash('無效的使用者名稱或密碼', 'danger')
+            flash('無效的登入帳號或密碼', 'danger')
             return redirect(url_for('user.login'))
-        
+        # ▲▲▲ 修改結束 ▲▲▲
+
         login_user(user, remember=form.remember_me.data)
         flash('登入成功！', 'success')
-
-        # 登入後導向至零用金主頁
         return redirect(url_for('petty_cash.index'))
-        
+
     return render_template('login.html', form=form)
 
 @user_bp.route('/logout')

@@ -3,11 +3,13 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h3>交易詳情</h3>
-    <div class="d-flex">
+    <div class="d-flex align-items-center">
         <a href="{{ url_for('petty_cash.index') }}" class="btn btn-secondary me-2">
             <i class="bi bi-arrow-left-circle"></i> 返回列表
         </a>
-        {% if transaction.status == ApprovalStatus.DRAFT and (transaction.applicant_name == current_user.username or
+
+        {% if '餘額結轉' not in transaction.description %}
+        {% if transaction.status == ApprovalStatus.DRAFT and (transaction.applicant_id == current_user.id or
         current_user.is_manager()) %}
         <form action="{{ url_for('petty_cash.submit_for_approval', transaction_id=transaction.id) }}" method="POST"
             class="me-2">
@@ -16,37 +18,29 @@
             </button>
         </form>
         {% endif %}
+
+        {% if transaction.status == ApprovalStatus.DRAFT or current_user.is_manager() %}
         {% if transaction.transaction_type == TransactionType.EXPENDITURE %}
         <a href="{{ url_for('petty_cash.edit_transaction', transaction_id=transaction.id) }}"
             class="btn btn-primary me-2">
-            <i class="bi bi-pencil-square"></i> 編輯支出
+            <i class="bi bi-pencil-square"></i> 編輯
         </a>
         {% else %}
         <a href="{{ url_for('petty_cash.edit_income', transaction_id=transaction.id) }}" class="btn btn-primary me-2">
-            <i class="bi bi-pencil-square"></i> 編輯收入
+            <i class="bi bi-pencil-square"></i> 編輯
         </a>
         {% endif %}
+
         <form action="{{ url_for('petty_cash.delete_transaction', transaction_id=transaction.id) }}" method="POST"
             onsubmit="return confirm('您確定要刪除這筆交易嗎？');">
             <button type="submit" class="btn btn-danger">
                 <i class="bi bi-trash3-fill"></i> 刪除
             </button>
         </form>
+        {% endif %}
+        {% endif %}
     </div>
 </div>
-
-<div class="card bg-light mb-4">
-    <div class="card-body text-center">
-        <h5 class="card-title mb-1">目前狀態</h5>
-        <span class="badge fs-4 
-            {% if transaction.status.name == 'APPROVED' %} bg-success
-            {% elif transaction.status.name == 'REJECTED' %} bg-danger
-            {% elif transaction.status.name == 'PENDING' %} bg-warning text-dark
-            {% else %} bg-secondary
-            {% endif %}">
-            {{ transaction.status.value }}
-        </span>
-    </div>
 </div>
 
 <div class="row">
@@ -83,10 +77,8 @@
                 <dl class="row text-end">
                     <dt class="col-sm-9">未稅總額 (Subtotal):</dt>
                     <dd class="col-sm-3">${{ "%.2f"|format(transaction.subtotal) }}</dd>
-
                     <dt class="col-sm-9">稅額 (Tax):</dt>
                     <dd class="col-sm-3">${{ "%.2f"|format(transaction.tax) }}</dd>
-
                     <dt class="col-sm-9 fs-5">總金額 (Total):</dt>
                     <dd class="col-sm-3 fw-bold fs-5 text-danger">${{ "%.2f"|format(transaction.total_amount|abs) }}
                     </dd>
@@ -118,7 +110,7 @@
                     <li class="list-group-item d-flex justify-content-between"><strong>交易日期:</strong> <span>{{
                             transaction.transaction_date.strftime('%Y-%m-%d') }}</span></li>
                     <li class="list-group-item d-flex justify-content-between"><strong>申請人:</strong> <span>{{
-                            transaction.applicant_name }}</span></li>
+                            transaction.applicant.display_name }}</span></li>
                     <li class="list-group-item d-flex justify-content-between"><strong>ERP 單號:</strong> <span>{{
                             transaction.erp_document_number or 'N/A' }}</span></li>
                     <li class="list-group-item d-flex justify-content-between"><strong>類型:</strong> <span>{{
@@ -128,14 +120,22 @@
         </div>
 
         <div class="card mb-4">
-            <div class="card-header">
+            <div class="card-header d-flex justify-content-between align-items-center">
                 <h5>簽核軌跡</h5>
+                <span class="badge fs-6 rounded-pill
+                    {% if transaction.status.name == 'APPROVED' %} bg-success
+                    {% elif transaction.status.name == 'REJECTED' %} bg-danger
+                    {% elif transaction.status.name == 'PENDING' %} bg-warning text-dark
+                    {% else %} bg-secondary
+                    {% endif %}">
+                    {{ transaction.status.value }}
+                </span>
             </div>
             <div class="card-body">
                 <ul class="list-group list-group-flush">
                     <li class="list-group-item d-flex justify-content-between align-items-center">
                         <span>申請人</span>
-                        <strong>{{ transaction.applicant_name }}</strong>
+                        <strong>{{ transaction.applicant.display_name }}</strong>
                     </li>
                     <li class="list-group-item d-flex justify-content-between align-items-center">
                         <span>申請日期</span>
@@ -144,7 +144,7 @@
                     <li class="list-group-item d-flex justify-content-between align-items-center">
                         <span>簽核主管</span>
                         {% if transaction.approver %}
-                        <strong>{{ transaction.approver.username }}</strong>
+                        <strong>{{ transaction.approver.display_name }}</strong>
                         {% else %}
                         <span class="text-muted">---</span>
                         {% endif %}
@@ -160,7 +160,6 @@
                 </ul>
             </div>
         </div>
-
     </div>
 </div>
 {% endblock %}

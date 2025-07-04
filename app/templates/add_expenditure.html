@@ -25,15 +25,14 @@
                 {{ form.erp_document_number(class="form-control") }}
             </div>
         </div>
-        <div class="row mb-3">
-            <div class="col-md-6">
-                {{ form.applicant_name.label(class="form-label") }}
-                {{ form.applicant_name(class="form-control", placeholder="請輸入申請人姓名") }}
-            </div>
-            <div class="col-md-6">
-                {{ form.description.label(class="form-label") }}
-                {{ form.description(class="form-control", placeholder="例如：購買文具用品") }}
-            </div>
+        <div class="mb-3">
+            {{ form.applicant_name.label(class="form-label") }}
+            {{ form.applicant_name(class="form-control", readonly=True) }}
+            <div class="form-text">系統自動帶入登入者，不可變更。</div>
+        </div>
+        <div class="mb-3">
+            {{ form.description.label(class="form-label") }}
+            {{ form.description(class="form-control", placeholder="例如：購買文具用品") }}
         </div>
 
         <div class="row mb-3 align-items-end">

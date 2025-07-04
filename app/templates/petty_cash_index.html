@@ -1,12 +1,14 @@
 {% extends "base.html" %}
-{% block title %}零用金儀表板{% endblock %}
+{% block title %}零用金管理{% endblock %}
 
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h2>交易總覽</h2>
     <div>
+        {% if current_user.is_manager() %}
         <a href="{{ url_for('petty_cash.add_income') }}" class="btn btn-success"><i class="bi bi-plus-circle"></i>
             新增收入</a>
+        {% endif %}
         <a href="{{ url_for('petty_cash.add_expenditure') }}" class="btn btn-danger"><i class="bi bi-dash-circle"></i>
             新增支出</a>
     </div>
@@ -52,7 +54,7 @@
                             </span>
                         </td>
                         <td>{{ transaction.description }}</td>
-                        <td>{{ transaction.applicant_name }}</td>
+                        <td>{{ transaction.applicant.display_name }}</td>
                         <td
                             class="text-end fw-bold {% if transaction.total_amount > 0 %}text-success{% else %}text-danger{% endif %}">
                             {{ "%.2f"|format(transaction.total_amount) }}
@@ -74,7 +76,9 @@
                                     <i class="bi bi-search"></i>
                                 </a>
 
-                                {% if transaction.status == ApprovalStatus.DRAFT or current_user.is_manager() %}
+                                {% if '餘額結轉' not in transaction.description and (transaction.status ==
+                                ApprovalStatus.DRAFT or current_user.is_manager()) %}
+
                                 {% if transaction.transaction_type == TransactionType.EXPENDITURE %}
                                 <a href="{{ url_for('petty_cash.edit_transaction', transaction_id=transaction.id) }}"
                                     class="btn btn-sm btn-outline-secondary" title="編輯">

@@ -25,30 +25,30 @@
                     {% for user in users.items %}
                     <tr>
                         <td>{{ user.id }}</td>
-                        <td>{{ user.username }}</td>
-                        <td>{{ user.email }}</td>
-                        <td>
-                            <span
-                                class="badge {% if user.is_manager() %}bg-info{% else %}bg-light text-dark{% endif %}">
-                                {{ user.role.value }}
-                            </span>
-                        </td>
-                        <td class="text-center">
-                            {% if user.id != current_user.id %}
-                            <form method="POST" action="{{ url_for('user.set_user_role', user_id=user.id) }}"
-                                class="d-inline">
-                                {% if user.is_manager() %}
-                                <button type="submit" name="role" value="USER"
-                                    class="btn btn-sm btn-outline-secondary">降為一般使用者</button>
+                        <<td>{{ user.display_name }}</td>
+                            <td>{{ user.email }}</td>
+                            <td>
+                                <span
+                                    class="badge {% if user.is_manager() %}bg-info{% else %}bg-light text-dark{% endif %}">
+                                    {{ user.role.value }}
+                                </span>
+                            </td>
+                            <td class="text-center">
+                                {% if user.id != current_user.id %}
+                                <form method="POST" action="{{ url_for('user.set_user_role', user_id=user.id) }}"
+                                    class="d-inline">
+                                    {% if user.is_manager() %}
+                                    <button type="submit" name="role" value="USER"
+                                        class="btn btn-sm btn-outline-secondary">降為一般使用者</button>
+                                    {% else %}
+                                    <button type="submit" name="role" value="MANAGER"
+                                        class="btn btn-sm btn-info">升為主管</button>
+                                    {% endif %}
+                                </form>
                                 {% else %}
-                                <button type="submit" name="role" value="MANAGER"
-                                    class="btn btn-sm btn-info">升為主管</button>
+                                <small class="text-muted">(無法變更自己)</small>
                                 {% endif %}
-                            </form>
-                            {% else %}
-                            <small class="text-muted">(無法變更自己)</small>
-                            {% endif %}
-                        </td>
+                            </td>
                     </tr>
                     {% else %}
                     <tr>

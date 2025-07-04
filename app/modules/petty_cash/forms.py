@@ -21,7 +21,7 @@ class ExpenditureForm(FlaskForm):
     application_date = DateField('申請日期：', validators=[DataRequired()], format='%Y-%m-%d')
     erp_document_number = StringField('ERP 單號：', validators=[Optional()])
     transaction_date = DateField('交易日期：', validators=[DataRequired()], format='%Y-%m-%d')
-    applicant_name = StringField('申請人：', validators=[DataRequired()])
+    applicant_name = StringField('申請人')
     description = StringField('摘要：', validators=[DataRequired()])
     
     tax_type = SelectField(
@@ -42,7 +42,6 @@ class IncomeForm(FlaskForm):
     """新增一筆收入的表單"""
     application_date = DateField('申請日期：', validators=[DataRequired()], format='%Y-%m-%d')
     transaction_date = DateField('交易日期：', validators=[DataRequired()], format='%Y-%m-%d')
-    applicant_name = StringField('經手人/來源：', validators=[DataRequired()])
     description = StringField('摘要：', validators=[DataRequired()])
     total_amount = DecimalField('收入金額：', validators=[DataRequired(), NumberRange(min=0)])
     submit = SubmitField('新增收入')

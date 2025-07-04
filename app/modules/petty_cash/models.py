@@ -29,7 +29,13 @@ class Transaction(db.Model):
     tax_type = db.Column(db.Enum(TaxType), nullable=False, default=TaxType.TAXABLE, server_default=TaxType.TAXABLE.name)
     tax_calculation_method = db.Column(db.Enum(TaxCalculationMethod), nullable=True)
     transaction_date = db.Column(db.Date, nullable=False, default=datetime.utcnow)
-    applicant_name = db.Column(db.String(100), nullable=False)
+    
+    # --- ▼▼▼ 這是我們的修改重點 ▼▼▼ ---
+    # 1. 移除 applicant_name = db.Column(db.String(100), nullable=False)
+    # 2. 新增 applicant_id，並設定它關聯到 users.id
+    applicant_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, comment='申請人ID')
+    # --- ▲▲▲ 修改結束 ▲▲▲ ---
+
     description = db.Column(db.String(200), nullable=False)
     subtotal = db.Column(db.Numeric(precision=10, scale=2), default=0.00)
     tax = db.Column(db.Numeric(precision=10, scale=2), default=0.00)
@@ -43,6 +49,11 @@ class Transaction(db.Model):
 
     items = db.relationship('TransactionItem', backref='transaction', lazy=True, cascade='all, delete-orphan')
     approver = db.relationship('User', backref='approved_transactions', foreign_keys=[approver_id])
+
+    # --- ▼▼▼ 這是我們的修改重點 ▼▼▼ ---
+    # 3. 新增 applicant 關聯，讓我們可以透過 transaction.applicant.username 輕鬆取得申請人姓名
+    applicant = db.relationship('User', backref='applied_transactions', foreign_keys=[applicant_id])
+    # --- ▲▲▲ 修改結束 ▲▲▲ ---
 
     def __repr__(self):
         return f"<Transaction {self.id}: {self.description}>"
@@ -78,7 +89,6 @@ class CashCountSession(db.Model):
 
     def __repr__(self):
         return f'<CashCountSession {self.id} on {self.count_date}>'
-
 
 class CashCountDetail(db.Model):
     """盤點工作階段明細表"""
