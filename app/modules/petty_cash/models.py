@@ -59,3 +59,36 @@ class TransactionItem(db.Model):
 
     def __repr__(self):
         return f"<TransactionItem {self.id}: {self.item_name}>"
+    
+class CashCountSession(db.Model):
+    """盤點工作階段主表"""
+    __tablename__ = 'cash_count_sessions'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    count_date = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, comment='盤點日期')
+    counted_total = db.Column(db.Numeric(precision=10, scale=2), nullable=False, comment='盤點總額')
+    system_balance = db.Column(db.Numeric(precision=10, scale=2), nullable=False, comment='系統帳上餘額')
+    difference = db.Column(db.Numeric(precision=10, scale=2), nullable=False, comment='差額')
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, comment='操作人員ID')
+    
+    # 建立與 User 的關聯
+    user = db.relationship('User', backref='cash_count_sessions')
+    # 建立與盤點明細的關聯
+    details = db.relationship('CashCountDetail', backref='session', lazy='dynamic', cascade='all, delete-orphan')
+
+    def __repr__(self):
+        return f'<CashCountSession {self.id} on {self.count_date}>'
+
+
+class CashCountDetail(db.Model):
+    """盤點工作階段明細表"""
+    __tablename__ = 'cash_count_details'
+
+    id = db.Column(db.Integer, primary_key=True)
+    denomination = db.Column(db.Integer, nullable=False, comment='面額 (例如: 1000, 500)')
+    quantity = db.Column(db.Integer, nullable=False, comment='張數/個數')
+    subtotal = db.Column(db.Numeric(precision=10, scale=2), nullable=False, comment='該面額小計')
+    session_id = db.Column(db.Integer, db.ForeignKey('cash_count_sessions.id'), nullable=False)
+
+    def __repr__(self):
+        return f'<CashCountDetail {self.denomination} x {self.quantity}>'

@@ -33,6 +33,16 @@
             注意：執行結轉前，請務必確認該月份的所有帳目皆已登錄完成。此操作將會產生一筆新的收入紀錄。
         </div>
     </div>
-
+    <div class="card">
+        <div class="card-header">
+            <h5>現金盤點小工具</h5>
+        </div>
+        <div class="card-body">
+            <p class="card-text">此工具可輔助您快速清點實體現金，並與系統帳上餘額進行核對。</p>
+            <a href="{{ url_for('petty_cash.cash_count_tool') }}" class="btn btn-outline-primary">
+                <i class="bi bi-calculator"></i> 前往盤點工具
+            </a>
+        </div>
+    </div>
 </div>
 {% endblock %}

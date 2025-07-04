@@ -1,8 +1,8 @@
 from flask import Blueprint, render_template, redirect, url_for, flash, request, jsonify
 from decimal import Decimal, ROUND_HALF_UP
-from flask_login import login_required
+from flask_login import login_required, current_user
 from app import db
-from .models import Transaction, TransactionItem, TransactionType, TaxType, TaxCalculationMethod, ApprovalStatus
+from .models import Transaction, TransactionItem, TransactionType, TaxType, TaxCalculationMethod, ApprovalStatus, CashCountSession, CashCountDetail
 from .forms import ExpenditureForm, IncomeForm, MonthEndSettlementForm
 from datetime import date, datetime, timedelta
 from sqlalchemy import func, extract
@@ -322,3 +322,50 @@ def settle_month_end():
                 flash(f'欄位 "{getattr(form, field).label.text}" 發生錯誤: {error}', 'danger')
 
     return redirect(url_for('petty_cash.accounting_operations'))
+
+@petty_cash_bp.route('/tools/cash_count')
+@login_required
+def cash_count_tool():
+    """顯示現金盤點工具頁面"""
+    # 計算目前的總餘額，這個邏輯和首頁 index 的一樣
+    total_income = db.session.query(func.sum(Transaction.total_amount)).filter(Transaction.transaction_type == TransactionType.INCOME).scalar() or Decimal('0.0')
+    total_expenditure = db.session.query(func.sum(Transaction.total_amount)).filter(Transaction.transaction_type == TransactionType.EXPENDITURE).scalar() or Decimal('0.0')
+    balance = total_income + total_expenditure
+    
+    return render_template('cash_count_tool.html', system_balance=balance)
+
+@petty_cash_bp.route('/tools/cash_count/save', methods=['POST'])
+@login_required
+def save_cash_count():
+    """儲存現金盤點紀錄"""
+    try:
+        # 建立一筆新的盤點主表紀錄
+        session = CashCountSession(
+            counted_total=Decimal(request.form.get('counted_total', 0)),
+            system_balance=Decimal(request.form.get('system_balance', 0)),
+            difference=Decimal(request.form.get('difference', 0)),
+            user_id=current_user.id
+        )
+        db.session.add(session)
+        
+        denominations = [1000, 500, 100, 50, 10, 5, 1]
+        # 處理盤點明細
+        for denom in denominations:
+            count = int(request.form.get(f'count_{denom}', 0))
+            if count > 0:
+                detail = CashCountDetail(
+                    denomination=denom,
+                    quantity=count,
+                    subtotal=Decimal(denom * count),
+                    session=session  # 這裡會自動關聯到主表
+                )
+                db.session.add(detail)
+
+        db.session.commit()
+        flash('盤點紀錄已成功儲存！', 'success')
+
+    except Exception as e:
+        db.session.rollback()
+        flash(f'儲存盤-點紀錄時發生錯誤：{e}', 'danger')
+
+    return redirect(url_for('petty_cash.cash_count_tool'))
