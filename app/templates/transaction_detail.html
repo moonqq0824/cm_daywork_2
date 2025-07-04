@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h3>交易詳情</h3>
+    <div class="d-flex">
+        <a href="{{ url_for('petty_cash.index') }}" class="btn btn-secondary me-2">
+            <i class="bi bi-arrow-left-circle"></i> 返回列表
+        </a>
+        {% if transaction.transaction_type == TransactionType.EXPENDITURE %}
+        <a href="{{ url_for('petty_cash.edit_transaction', transaction_id=transaction.id) }}"
+            class="btn btn-primary me-2">
+            <i class="bi bi-pencil-square"></i> 編輯支出
+        </a>
+        {% else %}
+        <a href="{{ url_for('petty_cash.edit_income', transaction_id=transaction.id) }}" class="btn btn-primary me-2">
+            <i class="bi bi-pencil-square"></i> 編輯收入
+        </a>
+        {% endif %}
+        <form action="{{ url_for('petty_cash.delete_transaction', transaction_id=transaction.id) }}" method="POST"
+            onsubmit="return confirm('您確定要刪除這筆交易嗎？');">
+            <button type="submit" class="btn btn-danger">
+                <i class="bi bi-trash3-fill"></i> 刪除
+            </button>
+        </form>
+    </div>
+</div>
+
+<div class="card bg-light mb-4">
+    <div class="card-body text-center">
+        <h5 class="card-title mb-1">目前狀態</h5>
+        <span class="badge fs-4 
+            {% if transaction.status.name == 'APPROVED' %} bg-success
+            {% elif transaction.status.name == 'REJECTED' %} bg-danger
+            {% elif transaction.status.name == 'PENDING' %} bg-warning text-dark
+            {% else %} bg-secondary
+            {% endif %}">
+            {{ transaction.status.value }}
+        </span>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-lg-8">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5>金額與明細</h5>
+            </div>
+            <div class="card-body">
+                {% if transaction.transaction_type == TransactionType.EXPENDITURE %}
+                <table class="table table-sm">
+                    <thead class="table-light">
+                        <tr>
+                            <th>品名</th>
+                            <th>數量</th>
+                            <th>單位</th>
+                            <th class="text-end">單價</th>
+                            <th class="text-end">小計</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in transaction.items %}
+                        <tr>
+                            <td>{{ item.item_name }}</td>
+                            <td>{{ "%.0f"|format(item.quantity) }}</td>
+                            <td>{{ item.unit }}</td>
+                            <td class="text-end">${{ "%.2f"|format(item.unit_price) }}</td>
+                            <td class="text-end">${{ "%.2f"|format(item.line_total) }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <hr>
+                <dl class="row text-end">
+                    <dt class="col-sm-9">未稅總額 (Subtotal):</dt>
+                    <dd class="col-sm-3">${{ "%.2f"|format(transaction.subtotal) }}</dd>
+
+                    <dt class="col-sm-9">稅額 (Tax):</dt>
+                    <dd class="col-sm-3">${{ "%.2f"|format(transaction.tax) }}</dd>
+
+                    <dt class="col-sm-9 fs-5">總金額 (Total):</dt>
+                    <dd class="col-sm-3 fw-bold fs-5 text-danger">${{ "%.2f"|format(transaction.total_amount|abs) }}
+                    </dd>
+                </dl>
+                {% else %}
+                <div class="text-center p-4">
+                    <h5 class="card-title">收入金額</h5>
+                    <p class="card-text fs-2 fw-bold text-success">
+                        + ${{ "%.2f"|format(transaction.total_amount) }}
+                    </p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-4">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5>基本資訊</h5>
+            </div>
+            <div class="card-body">
+                <ul class="list-group list-group-flush">
+                    <li class="list-group-item d-flex justify-content-between"><strong>ID:</strong> <span>{{
+                            transaction.id }}</span></li>
+                    <li class="list-group-item d-flex justify-content-between"><strong>摘要:</strong> <span>{{
+                            transaction.description }}</span></li>
+                    <li class="list-group-item d-flex justify-content-between"><strong>申請日期:</strong> <span>{{
+                            transaction.application_date.strftime('%Y-%m-%d') }}</span></li>
+                    <li class="list-group-item d-flex justify-content-between"><strong>交易日期:</strong> <span>{{
+                            transaction.transaction_date.strftime('%Y-%m-%d') }}</span></li>
+                    <li class="list-group-item d-flex justify-content-between"><strong>申請人:</strong> <span>{{
+                            transaction.applicant_name }}</span></li>
+                    <li class="list-group-item d-flex justify-content-between"><strong>ERP 單號:</strong> <span>{{
+                            transaction.erp_document_number or 'N/A' }}</span></li>
+                    <li class="list-group-item d-flex justify-content-between"><strong>類型:</strong> <span>{{
+                            transaction.transaction_type.value }}</span></li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5>簽核軌跡</h5>
+            </div>
+            <div class="card-body text-muted">
+                <div class="d-flex justify-content-between"><span>簽核主管:</span><span>{{ transaction.approver.username if
+                        transaction.approver else '尚未簽核' }}</span></div>
+                <div class="d-flex justify-content-between"><span>簽核日期:</span><span>{{
+                        transaction.approval_date.strftime('%Y-%m-%d') if transaction.approval_date else 'N/A' }}</span>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+{% endblock %}

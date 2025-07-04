@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}零用金儀表板{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>交易總覽</h2>
+    <div>
+        <a href="{{ url_for('petty_cash.add_income') }}" class="btn btn-success"><i class="bi bi-plus-circle"></i>
+            新增收入</a>
+        <a href="{{ url_for('petty_cash.add_expenditure') }}" class="btn btn-danger"><i class="bi bi-dash-circle"></i>
+            新增支出</a>
+    </div>
+</div>
+
+<div class="card text-center mb-4">
+    <div class="card-body">
+        <h5 class="card-title">目前總餘額</h5>
+        <p class="card-text fs-2 fw-bold {% if balance >= 0 %}text-success{% else %}text-danger{% endif %}">
+            $ {{ "%.2f"|format(balance) }}
+        </p>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <h5 class="card-title">近期交易紀錄</h5>
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>ID</th>
+                        <th>申請日</th>
+                        <th>交易日</th>
+                        <th>類型</th>
+                        <th>摘要</th>
+                        <th>申請人</th>
+                        <th class="text-end">金額</th>
+                        <th>狀態</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for transaction in transactions.items %}
+                    <tr>
+                        <td>{{ transaction.id }}</td>
+                        <td>{{ transaction.application_date.strftime('%Y-%m-%d') }}</td>
+                        <td>{{ transaction.transaction_date.strftime('%Y-%m-%d') }}</td>
+                        <td>
+                            <span
+                                class="badge {% if transaction.transaction_type == TransactionType.INCOME %}bg-success-subtle text-success-emphasis{% else %}bg-danger-subtle text-danger-emphasis{% endif %}">
+                                {{ transaction.transaction_type.value }}
+                            </span>
+                        </td>
+                        <td>{{ transaction.description }}</td>
+                        <td>{{ transaction.applicant_name }}</td>
+                        <td
+                            class="text-end fw-bold {% if transaction.total_amount > 0 %}text-success{% else %}text-danger{% endif %}">
+                            {{ "%.2f"|format(transaction.total_amount) }}
+                        </td>
+                        <td>
+                            <span class="badge rounded-pill 
+                                {% if transaction.status.name == 'APPROVED' %} bg-success
+                                {% elif transaction.status.name == 'REJECTED' %} bg-danger
+                                {% elif transaction.status.name == 'PENDING' %} bg-warning text-dark
+                                {% else %} bg-secondary
+                                {% endif %}">
+                                {{ transaction.status.value }}
+                            </span>
+                        </td>
+                        <td>
+                            <a href="{{ url_for('petty_cash.transaction_detail', transaction_id=transaction.id) }}"
+                                class="btn btn-sm btn-outline-primary">
+                                <i class="bi bi-search"></i> 詳情
+                            </a>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="9" class="text-center text-muted">目前沒有任何交易紀錄。</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<nav aria-label="Page navigation">
+    <ul class="pagination justify-content-center">
+        {% if transactions.has_prev %}
+        <li class="page-item"><a class="page-link"
+                href="{{ url_for('petty_cash.index', page=transactions.prev_num) }}">&laquo; 上一頁</a></li>
+        {% else %}
+        <li class="page-item disabled"><span class="page-link">&laquo; 上一頁</span></li>
+        {% endif %}
+
+        {% for page_num in transactions.iter_pages() %}
+        {% if page_num %}
+        {% if transactions.page == page_num %}
+        <li class="page-item active"><a class="page-link" href="#">{{ page_num }}</a></li>
+        {% else %}
+        <li class="page-item"><a class="page-link" href="{{ url_for('petty_cash.index', page=page_num) }}">{{ page_num
+                }}</a></li>
+        {% endif %}
+        {% else %}
+        <li class="page-item disabled"><span class="page-link">...</span></li>
+        {% endif %}
+        {% endfor %}
+
+        {% if transactions.has_next %}
+        <li class="page-item"><a class="page-link"
+                href="{{ url_for('petty_cash.index', page=transactions.next_num) }}">下一頁 &raquo;</a></li>
+        {% else %}
+        <li class="page-item disabled"><span class="page-link">下一頁 &raquo;</span></li>
+        {% endif %}
+    </ul>
+</nav>
+{% endblock %}
