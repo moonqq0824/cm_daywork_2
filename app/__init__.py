@@ -5,13 +5,22 @@ from flask_migrate import Migrate
 from flask_login import LoginManager
 from dotenv import load_dotenv
 from datetime import datetime
+from sqlalchemy import MetaData
 
 load_dotenv()
 
-db = SQLAlchemy()
+naming_convention = {
+    "ix": 'ix_%(column_0_label)s',
+    "uq": "uq_%(table_name)s_%(column_0_name)s",
+    "ck": "ck_%(table_name)s_%(constraint_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+    "pk": "pk_%(table_name)s"
+}
+
+db = SQLAlchemy(metadata=MetaData(naming_convention=naming_convention))
 migrate = Migrate()
 login_manager = LoginManager()
-login_manager.login_view = 'user.login' # 未登入時會被導向的登入頁面
+login_manager.login_view = 'user.login'
 login_manager.login_message = '請先登入以存取此頁面。'
 login_manager.login_message_category = 'info'
 
@@ -30,7 +39,7 @@ def create_app():
 
     # 初始化擴充套件
     db.init_app(app)
-    migrate.init_app(app, db)
+    migrate.init_app(app, db, render_as_batch=True)
     login_manager.init_app(app)
 
     # 註冊藍圖 (Blueprints)

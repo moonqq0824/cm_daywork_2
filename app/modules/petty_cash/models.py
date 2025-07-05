@@ -2,6 +2,19 @@ import enum
 from datetime import datetime
 from app import db
 
+class Category(db.Model):
+    """費用分類模型"""
+    __tablename__ = 'categories'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), unique=True, nullable=False, comment='分類名稱')
+    
+    # 建立與交易明細的反向關聯
+    items = db.relationship('TransactionItem', backref='category', lazy=True)
+
+    def __repr__(self):
+        return f'<Category {self.name}>'
+
 class TransactionType(enum.Enum):
     INCOME = '收入'
     EXPENDITURE = '支出'
@@ -68,6 +81,7 @@ class TransactionItem(db.Model):
     unit_price = db.Column(db.Numeric(precision=10, scale=2), nullable=False)
     line_total = db.Column(db.Numeric(precision=10, scale=2), nullable=False)
     transaction_id = db.Column(db.Integer, db.ForeignKey('transactions.id'), nullable=False)
+    category_id = db.Column(db.Integer, db.ForeignKey('categories.id'), nullable=True, comment='費用分類ID')
 
     def __repr__(self):
         return f"<TransactionItem {self.id}: {self.item_name}>"
@@ -103,3 +117,4 @@ class CashCountDetail(db.Model):
 
     def __repr__(self):
         return f'<CashCountDetail {self.denomination} x {self.quantity}>'
+

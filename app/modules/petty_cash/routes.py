@@ -7,7 +7,9 @@ from .forms import ExpenditureForm, IncomeForm, MonthEndSettlementForm, Rejectio
 from datetime import date, datetime, timedelta
 from sqlalchemy import func, extract
 from app.modules.user.routes import manager_required
-import calendar 
+import calendar
+from .models import Category
+from .forms import CategoryForm
 
 petty_cash_bp = Blueprint('petty_cash', __name__)
 
@@ -119,7 +121,8 @@ def add_expenditure():
                     quantity=Decimal(item_data['quantity']), unit=item_data['unit'],
                     unit_price=Decimal(item_data['unit_price']),
                     line_total=Decimal(item_data['quantity']) * Decimal(item_data['unit_price']),
-                    transaction=new_transaction
+                    transaction=new_transaction,
+                    category_id=item_data['category_id'].id if item_data['category_id'] else None
                 )
             
             db.session.add(new_transaction)
@@ -183,7 +186,8 @@ def edit_transaction(transaction_id):
                     item_name=item_data['item_name'],
                     quantity=Decimal(item_data['quantity']), unit=item_data['unit'],
                     unit_price=Decimal(item_data['unit_price']),
-                    line_total=Decimal(item_data['quantity']) * Decimal(item_data['unit_price'])
+                    line_total=Decimal(item_data['quantity']) * Decimal(item_data['unit_price']),
+                    category_id=item_data['category_id'].id if item_data['category_id'] else None
                 ))
             
             db.session.commit()
@@ -611,3 +615,48 @@ def delete_cash_count_session(session_id):
         flash(f'刪除時發生錯誤：{e}', 'danger')
         
     return redirect(url_for('petty_cash.cash_count_history'))
+
+@petty_cash_bp.route('/categories')
+@login_required
+@manager_required
+def category_management():
+    """顯示費用分類管理頁面"""
+    categories = Category.query.order_by(Category.name).all()
+    form = CategoryForm()
+    return render_template('category_management.html', categories=categories, form=form)
+
+@petty_cash_bp.route('/categories/add', methods=['POST'])
+@login_required
+@manager_required
+def add_category():
+    """新增費用分類"""
+    form = CategoryForm()
+    if form.validate_on_submit():
+        # 檢查分類名稱是否已存在
+        existing_category = Category.query.filter_by(name=form.name.data).first()
+        if existing_category:
+            flash('錯誤：該分類名稱已存在。', 'danger')
+        else:
+            new_category = Category(name=form.name.data)
+            db.session.add(new_category)
+            db.session.commit()
+            flash('新的費用分類已成功新增！', 'success')
+    return redirect(url_for('petty_cash.category_management'))
+
+@petty_cash_bp.route('/categories/<int:category_id>/delete', methods=['POST'])
+@login_required
+@manager_required
+def delete_category(category_id):
+    """刪除費用分類"""
+    category_to_delete = db.session.get(Category, category_id)
+    if category_to_delete:
+        # 檢查是否有任何交易明細正在使用這個分類
+        if category_to_delete.items:
+            flash('錯誤：無法刪除此分類，因為已有支出項目正在使用它。', 'danger')
+        else:
+            db.session.delete(category_to_delete)
+            db.session.commit()
+            flash('費用分類已成功刪除。', 'success')
+    else:
+        flash('找不到該分類。', 'danger')
+    return redirect(url_for('petty_cash.category_management'))

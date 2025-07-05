@@ -1,70 +1,66 @@
 from flask_wtf import FlaskForm
-from wtforms import StringField, SubmitField, FieldList, FormField, DecimalField, DateField, SelectField, RadioField
-from wtforms.validators import DataRequired, NumberRange, Optional
-# 這裡只從 models 匯入我們需要用到的 Enum，而不是整個模型
-from .models import TaxType, TaxCalculationMethod
-from wtforms import SelectField
+from wtforms import StringField, PasswordField, BooleanField, SubmitField, FieldList, FormField, DecimalField, DateField, SelectField, RadioField, TextAreaField
+from wtforms.validators import DataRequired, Email, NumberRange, Optional
+from wtforms_sqlalchemy.fields import QuerySelectField
 from datetime import datetime
-from wtforms import TextAreaField
+
+# 從 models 匯入所有我們需要用到的模型和枚舉
+from .models import TaxType, TaxCalculationMethod, Category
+
+# 建立一個輔助函式，用來查詢所有分類，並提供給 QuerySelectField
+def category_query():
+    return Category.query.order_by(Category.name)
 
 class TransactionItemForm(FlaskForm):
     """子表單：用於單個明細項目"""
     class Meta:
-        csrf = False  # 子表單通常不需要獨立的 CSRF 保護
-    item_name = StringField('品名：', validators=[DataRequired()])
-    quantity = DecimalField('數量：', validators=[DataRequired(), NumberRange(min=0)])
-    unit = StringField('單位：')
-    unit_price = DecimalField('單價：', validators=[DataRequired()])
-
+        csrf = False
+    
+    item_name = StringField('品名', validators=[DataRequired()])
+    quantity = DecimalField('數量', validators=[DataRequired(), NumberRange(min=0)])
+    unit = StringField('單位', validators=[Optional()])
+    unit_price = DecimalField('單價', validators=[DataRequired()])
+    category_id = QuerySelectField(
+        '費用分類', 
+        query_factory=category_query, 
+        get_label='name', 
+        allow_blank=True,
+        blank_text='-- 請選擇分類 --'
+    )
 
 class ExpenditureForm(FlaskForm):
     """主表單：新增一筆支出"""
-    application_date = DateField('申請日期：', validators=[DataRequired()], format='%Y-%m-%d')
-    erp_document_number = StringField('ERP 單號：', validators=[Optional()])
-    transaction_date = DateField('交易日期：', validators=[DataRequired()], format='%Y-%m-%d')
-    applicant_name = StringField('申請人')
-    description = StringField('摘要：', validators=[DataRequired()])
-    
-    tax_type = SelectField(
-        '稅別：',
-        choices=[(t.name, t.value) for t in TaxType],
-        validators=[DataRequired()]
-    )
-    tax_calculation_method = RadioField(
-        '計稅方式：',
-        choices=[(t.name, t.value) for t in TaxCalculationMethod],
-        default=TaxCalculationMethod.EXCLUSIVE.name,
-        validators=[Optional()]
-    )
+    application_date = DateField('申請日期', validators=[DataRequired()], format='%Y-%m-%d')
+    erp_document_number = StringField('ERP 單號', validators=[Optional()])
+    transaction_date = DateField('交易日期', validators=[DataRequired()], format='%Y-%m-%d')
+    applicant_name = StringField('申請人') # 保留此欄位用於前端顯示，後端會自動填入
+    description = StringField('摘要', validators=[DataRequired()])
+    tax_type = SelectField('稅別', choices=[(t.name, t.value) for t in TaxType], validators=[DataRequired()])
+    tax_calculation_method = RadioField('計稅方式', choices=[(t.name, t.value) for t in TaxCalculationMethod], default=TaxCalculationMethod.EXCLUSIVE.name, validators=[Optional()])
     items = FieldList(FormField(TransactionItemForm), min_entries=0)
     submit = SubmitField('新增支出')
 
 class IncomeForm(FlaskForm):
     """新增一筆收入的表單"""
-    application_date = DateField('申請日期：', validators=[DataRequired()], format='%Y-%m-%d')
-    transaction_date = DateField('交易日期：', validators=[DataRequired()], format='%Y-%m-%d')
-    description = StringField('摘要：', validators=[DataRequired()])
-    total_amount = DecimalField('收入金額：', validators=[DataRequired(), NumberRange(min=0)])
+    application_date = DateField('申請日期', validators=[DataRequired()], format='%Y-%m-%d')
+    transaction_date = DateField('交易日期', validators=[DataRequired()], format='%Y-%m-%d')
+    description = StringField('摘要', validators=[DataRequired()])
+    total_amount = DecimalField('收入金額', validators=[DataRequired(), NumberRange(min=0)])
     submit = SubmitField('新增收入')
 
 class MonthEndSettlementForm(FlaskForm):
     """月結作業表單"""
     current_year = datetime.utcnow().year
-    # 建立從今年到過去五年的年份選項
-    year = SelectField(
-        '年份',
-        choices=[(str(y), f'{y}年') for y in range(current_year, current_year - 5, -1)],
-        validators=[DataRequired()]
-    )
-    # 建立月份選項
-    month = SelectField(
-        '月份',
-        choices=[(str(m), f'{m}月') for m in range(1, 13)],
-        validators=[DataRequired()]
-    )
+    year = SelectField('年份', choices=[(str(y), f'{y}年') for y in range(current_year, current_year - 5, -1)], validators=[DataRequired()])
+    month = SelectField('月份', choices=[(str(m), f'{m}月') for m in range(1, 13)], validators=[DataRequired()])
     submit = SubmitField('執行結轉')
 
 class RejectionForm(FlaskForm):
     """駁回理由表單"""
     rejection_reason = TextAreaField('駁回理由', validators=[DataRequired()])
     submit = SubmitField('確認駁回')
+    
+class CategoryForm(FlaskForm):
+    """費用分類表單"""
+    name = StringField('分類名稱', validators=[DataRequired()])
+    submit = SubmitField('儲存')

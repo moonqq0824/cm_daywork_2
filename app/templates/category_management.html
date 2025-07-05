@@ -1,0 +1,54 @@
+{% extends "base.html" %} {% block title %}費用分類管理{% endblock %} {% block
+content %}
+<div class="row">
+  <div class="col-lg-7">
+    <div class="card">
+      <div class="card-header">
+        <h5>現有分類</h5>
+      </div>
+      <div class="card-body">
+        {% if categories %}
+        <ul class="list-group">
+          {% for category in categories %}
+          <li
+            class="list-group-item d-flex justify-content-between align-items-center"
+          >
+            {{ category.name }}
+            <form
+              action="{{ url_for('petty_cash.delete_category', category_id=category.id) }}"
+              method="POST"
+              onsubmit="return confirm('您確定要刪除「{{ category.name }}」這個分類嗎？');"
+            >
+              <button type="submit" class="btn btn-sm btn-outline-danger">
+                <i class="bi bi-trash3"></i>
+              </button>
+            </form>
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="text-muted text-center">目前沒有任何費用分類。</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-5">
+    <div class="card">
+      <div class="card-header">
+        <h5>新增分類</h5>
+      </div>
+      <div class="card-body">
+        <form action="{{ url_for('petty_cash.add_category') }}" method="POST">
+          {{ form.hidden_tag() }}
+          <div class="mb-3">
+            {{ form.name.label(class="form-label") }} {{
+            form.name(class="form-control", placeholder="例如：辦公用品") }}
+          </div>
+          {{ form.submit(class="btn btn-primary w-100") }}
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
