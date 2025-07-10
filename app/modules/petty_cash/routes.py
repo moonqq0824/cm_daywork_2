@@ -7,9 +7,67 @@ from .forms import ExpenditureForm, IncomeForm, MonthEndSettlementForm, Rejectio
 from datetime import date, datetime, timedelta
 from sqlalchemy import func, extract
 from app.modules.user.routes import manager_required
-import calendar 
+import calendar
+from .models import Category
+from .forms import CategoryForm
 
 petty_cash_bp = Blueprint('petty_cash', __name__)
+
+# --- ▼▼▼ 新增：輔助函式 ▼▼▼ ---
+
+def _calculate_current_balance():
+    """計算當前的系統總餘額"""
+    latest_settlement = Transaction.query.filter(
+        Transaction.description.like('%餘額結轉%')
+    ).order_by(Transaction.transaction_date.desc()).first()
+
+    balance = Decimal('0.0')
+    start_date = date(1900, 1, 1)
+    if latest_settlement:
+        balance = latest_settlement.total_amount
+        start_date = latest_settlement.transaction_date
+
+    income_since_start = db.session.query(func.sum(Transaction.total_amount)).filter(
+        Transaction.transaction_type == TransactionType.INCOME,
+        Transaction.transaction_date > start_date,
+        ~Transaction.description.like('%餘額結轉%')
+    ).scalar() or Decimal('0.0')
+
+    expenditure_since_start = db.session.query(func.sum(Transaction.total_amount)).filter(
+        Transaction.transaction_type == TransactionType.EXPENDITURE,
+        Transaction.transaction_date > start_date
+    ).scalar() or Decimal('0.0')
+
+    return balance + income_since_start + expenditure_since_start
+
+def _calculate_tax_and_total(base_amount, tax_type_str, tax_calc_method_str):
+    """根據稅別和計稅方式計算稅後金額"""
+    tax_rate = Decimal('0.05')
+    subtotal, tax, total_amount = Decimal('0.0'), Decimal('0.0'), Decimal('0.0')
+
+    if tax_type_str == TaxType.TAXABLE.name:
+        if tax_calc_method_str == TaxCalculationMethod.EXCLUSIVE.name:
+            subtotal = base_amount
+            tax = (subtotal * tax_rate).quantize(Decimal('1'), rounding=ROUND_HALF_UP)
+            total_amount = subtotal + tax
+        elif tax_calc_method_str == TaxCalculationMethod.INCLUSIVE.name:
+            total_amount = base_amount
+            # 修正：內含稅的未稅額計算應該用 total_amount 來除
+            subtotal = (total_amount / (1 + tax_rate)).quantize(Decimal('1'), rounding=ROUND_HALF_UP)
+            tax = total_amount - subtotal
+        else: # 如果沒有選擇計稅方式，預設為稅外加
+            subtotal = base_amount
+            tax = (subtotal * tax_rate).quantize(Decimal('1'), rounding=ROUND_HALF_UP)
+            total_amount = subtotal + tax
+    else: # 免稅或零稅率
+        subtotal = base_amount
+        tax = Decimal('0.0')
+        total_amount = base_amount
+        
+    return subtotal, tax, total_amount
+
+# --- ▲▲▲ 輔助函式結束 ▲▲▲ ---
+
 
 @petty_cash_bp.route('/')
 @login_required
@@ -18,39 +76,13 @@ def index():
     transactions_query = Transaction.query.order_by(Transaction.transaction_date.desc(), Transaction.id.desc())
     transactions = transactions_query.paginate(page=page, per_page=10, error_out=False)
     
-    # --- 最新的、與結轉功能完全同步的餘額計算邏輯 ---
-    
-    # 1. 找到最新的一筆結轉紀錄 (這次是全局尋找，沒有日期限制)
-    latest_settlement = Transaction.query.filter(
-        Transaction.description.like('%餘額結轉%')
-    ).order_by(Transaction.transaction_date.desc()).first()
-
-    # 2. 決定計算的起始點（期初餘額）
-    balance = Decimal('0.0')
-    start_date = date(1900, 1, 1) # 預設一個很早的日期
-    if latest_settlement:
-        balance = latest_settlement.total_amount
-        start_date = latest_settlement.transaction_date
-
-    # 3. 計算從「起始點」到「今天」為止，所有新發生的收支
-    income_since_start = db.session.query(func.sum(Transaction.total_amount)).filter(
-        Transaction.transaction_type == TransactionType.INCOME,
-        Transaction.transaction_date > start_date,
-        ~Transaction.description.like('%餘額結轉%') # 計算時要排除結轉本身的金額
-    ).scalar() or Decimal('0.0')
-
-    expenditure_since_start = db.session.query(func.sum(Transaction.total_amount)).filter(
-        Transaction.transaction_type == TransactionType.EXPENDITURE,
-        Transaction.transaction_date > start_date
-    ).scalar() or Decimal('0.0')
-
-    # 4. 得到最終正確的目前餘額
-    current_balance = balance + income_since_start + expenditure_since_start
+    # --- 優化：直接呼叫輔助函式 ---
+    current_balance = _calculate_current_balance()
 
     return render_template(
         'petty_cash_index.html', 
         transactions=transactions, 
-        balance=current_balance, # 傳遞修正後的餘額
+        balance=current_balance,
         TransactionType=TransactionType,
         ApprovalStatus=ApprovalStatus
     )
@@ -66,7 +98,7 @@ def transaction_detail(transaction_id):
         'transaction_detail.html', 
         transaction=transaction, 
         TransactionType=TransactionType, 
-        ApprovalStatus=ApprovalStatus  # <--- 新增這一行
+        ApprovalStatus=ApprovalStatus
     )
 
 @petty_cash_bp.route('/expenditure/add', methods=['GET', 'POST'])
@@ -80,25 +112,14 @@ def add_expenditure():
 
     if form.validate_on_submit():
         try:
-            # 稅務計算
-            tax_type_str = form.tax_type.data
-            tax_calc_method_str = form.tax_calculation_method.data
             base_amount = sum(Decimal(item['quantity']) * Decimal(item['unit_price']) for item in form.items.data)
             
-            subtotal, tax, total_amount = Decimal('0.0'), Decimal('0.0'), Decimal('0.0')
-
-            if tax_type_str == TaxType.TAXABLE.name:
-                tax_rate = Decimal('0.05')
-                if tax_calc_method_str == TaxCalculationMethod.EXCLUSIVE.name:
-                    subtotal = base_amount
-                    tax = (subtotal * tax_rate).quantize(Decimal('1'), rounding=ROUND_HALF_UP)
-                    total_amount = subtotal + tax
-                elif tax_calc_method_str == TaxCalculationMethod.INCLUSIVE.name:
-                    total_amount = base_amount
-                    subtotal = (total_amount / (1 + tax_rate)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                    tax = total_amount - subtotal
-            else:
-                subtotal, tax, total_amount = base_amount, Decimal('0.0'), base_amount
+            # --- 優化：直接呼叫輔助函式 ---
+            subtotal, tax, total_amount = _calculate_tax_and_total(
+                base_amount,
+                form.tax_type.data,
+                form.tax_calculation_method.data
+            )
             
             new_transaction = Transaction(
                 transaction_type=TransactionType.EXPENDITURE,
@@ -108,19 +129,25 @@ def add_expenditure():
                 transaction_date=form.transaction_date.data,
                 applicant_id=current_user.id,
                 description=form.description.data,
-                tax_type=TaxType[tax_type_str],
-                tax_calculation_method=TaxCalculationMethod[tax_calc_method_str] if tax_calc_method_str else None,
+                tax_type=TaxType[form.tax_type.data],
+                tax_calculation_method=TaxCalculationMethod[form.tax_calculation_method.data] if form.tax_calculation_method.data else None,
                 subtotal=subtotal, tax=tax, total_amount=-total_amount,
             )
             
             for item_data in form.items.data:
+                # 確保 category_id 是從 QuerySelectField 物件中正確取得 id
+                category_obj = item_data.get('category_id')
+                cat_id = category_obj.id if category_obj else None
+
                 new_item = TransactionItem(
                     item_name=item_data['item_name'],
                     quantity=Decimal(item_data['quantity']), unit=item_data['unit'],
                     unit_price=Decimal(item_data['unit_price']),
                     line_total=Decimal(item_data['quantity']) * Decimal(item_data['unit_price']),
-                    transaction=new_transaction
+                    transaction=new_transaction,
+                    category_id=cat_id
                 )
+                db.session.add(new_item) # 將 new_item 加入 session
             
             db.session.add(new_transaction)
             db.session.commit()
@@ -140,51 +167,52 @@ def edit_transaction(transaction_id):
         flash('找不到該筆支出紀錄。', 'danger')
         return redirect(url_for('petty_cash.index'))
     
-    if transaction.status != ApprovalStatus.DRAFT and not current_user.is_manager():
-        flash('此申請已送出，無法編輯。', 'warning')
+    # 權限檢查：只有草稿或被駁回的單據可以由本人或主管編輯
+    is_editable = (transaction.status in [ApprovalStatus.DRAFT, ApprovalStatus.REJECTED] and transaction.applicant_id == current_user.id) or current_user.is_manager()
+    if not is_editable:
+        flash('此單據狀態無法編輯。', 'warning')
         return redirect(url_for('petty_cash.transaction_detail', transaction_id=transaction_id))
     
     form = ExpenditureForm(obj=transaction)
 
     if form.validate_on_submit():
         try:
-            # (稅務計算邏輯與 add 相同)
-            tax_type_str = form.tax_type.data
-            tax_calc_method_str = form.tax_calculation_method.data
             base_amount = sum(Decimal(item['quantity']) * Decimal(item['unit_price']) for item in form.items.data)
-            subtotal, tax, total_amount = Decimal('0.0'), Decimal('0.0'), Decimal('0.0')
-
-            if tax_type_str == TaxType.TAXABLE.name:
-                tax_rate = Decimal('0.05')
-                if tax_calc_method_str == TaxCalculationMethod.EXCLUSIVE.name:
-                    subtotal = base_amount; tax = (subtotal * tax_rate).quantize(Decimal('1'), rounding=ROUND_HALF_UP)
-                    total_amount = subtotal + tax
-                elif tax_calc_method_str == TaxCalculationMethod.INCLUSIVE.name:
-                    total_amount = base_amount; subtotal = (total_amount / (1 + tax_rate)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                    tax = total_amount - subtotal
-            else:
-                subtotal, tax, total_amount = base_amount, Decimal('0.0'), base_amount
+            
+            # --- 優化：直接呼叫輔助函式 ---
+            subtotal, tax, total_amount = _calculate_tax_and_total(
+                base_amount,
+                form.tax_type.data,
+                form.tax_calculation_method.data
+            )
 
             # 更新主表資料
             transaction.application_date = form.application_date.data
             transaction.erp_document_number = form.erp_document_number.data
             transaction.transaction_date = form.transaction_date.data
-            transaction.applicant_name = form.applicant_name.data
             transaction.description = form.description.data
             transaction.tax_type = TaxType[form.tax_type.data]
             transaction.tax_calculation_method = TaxCalculationMethod[form.tax_calculation_method.data] if form.tax_calculation_method.data else None
             transaction.subtotal, transaction.tax, transaction.total_amount = subtotal, tax, -total_amount
             
             # 清空舊明細，建立新明細
-            transaction.items = []
+            for item in transaction.items:
+                db.session.delete(item)
             db.session.flush()
+
             for item_data in form.items.data:
-                transaction.items.append(TransactionItem(
+                category_obj = item_data.get('category_id')
+                cat_id = category_obj.id if category_obj else None
+                
+                new_item = TransactionItem(
                     item_name=item_data['item_name'],
                     quantity=Decimal(item_data['quantity']), unit=item_data['unit'],
                     unit_price=Decimal(item_data['unit_price']),
-                    line_total=Decimal(item_data['quantity']) * Decimal(item_data['unit_price'])
-                ))
+                    line_total=Decimal(item_data['quantity']) * Decimal(item_data['unit_price']),
+                    category_id=cat_id,
+                    transaction_id=transaction.id # 關聯回主表
+                )
+                db.session.add(new_item)
             
             db.session.commit()
             flash('支出紀錄已成功更新！', 'success')
@@ -193,20 +221,15 @@ def edit_transaction(transaction_id):
             db.session.rollback()
             flash(f'更新失敗，錯誤：{e}', 'danger')
 
-    # GET 請求時，手動設定 Enum 類型的值
+    # GET 請求時，填充表單的預設值
     form.tax_type.data = transaction.tax_type.name
     if transaction.tax_calculation_method:
         form.tax_calculation_method.data = transaction.tax_calculation_method.name
-
-    # 手動填充 Enum 類型的值
-    form.tax_type.data = transaction.tax_type.name
-    if transaction.tax_calculation_method:
-        form.tax_calculation_method.data = transaction.tax_calculation_method.name
-
-    # 手動填充申請人姓名
     form.applicant_name.data = transaction.applicant.display_name
 
     return render_template('edit_transaction.html', form=form, transaction_id=transaction_id)
+
+# ... (add_income, edit_income, delete_transaction 保持不變) ...
 
 @petty_cash_bp.route('/income/add', methods=['GET', 'POST'])
 @login_required
@@ -228,7 +251,7 @@ def add_income():
                 total_amount=form.total_amount.data,
                 subtotal=form.total_amount.data,
                 tax=0, tax_type=TaxType.TAX_EXEMPT,
-                status=ApprovalStatus.APPROVED
+                status=ApprovalStatus.APPROVED # 收入預設為已核准
             )
             db.session.add(new_income)
             db.session.commit()
@@ -255,7 +278,6 @@ def edit_income(transaction_id):
         try:
             transaction.application_date = form.application_date.data
             transaction.transaction_date = form.transaction_date.data
-            transaction.applicant_name = form.applicant_name.data
             transaction.description = form.description.data
             transaction.total_amount = form.total_amount.data
             transaction.subtotal = form.total_amount.data
@@ -277,11 +299,16 @@ def delete_transaction(transaction_id):
         flash('找不到該筆交易。', 'danger')
         return redirect(url_for('petty_cash.index'))
     
-    if transaction.status != ApprovalStatus.DRAFT and not current_user.is_manager():
-        flash('此申請已送出，無法刪除。', 'warning')
+    # 權限檢查：只有草稿狀態的單據可以由本人或主管刪除
+    can_delete = transaction.status == ApprovalStatus.DRAFT and (transaction.applicant_id == current_user.id or current_user.is_manager())
+    if not can_delete:
+        flash('此申請已送出或已核准，無法刪除。', 'warning')
         return redirect(url_for('petty_cash.transaction_detail', transaction_id=transaction_id))
 
     try:
+        # 刪除關聯的明細
+        for item in transaction.items:
+            db.session.delete(item)
         db.session.delete(transaction)
         db.session.commit()
         flash(f'交易 (ID: {transaction_id}) 已成功刪除。', 'success')
@@ -290,12 +317,12 @@ def delete_transaction(transaction_id):
         flash(f'刪除失敗，錯誤：{e}', 'danger')
     return redirect(url_for('petty_cash.index'))
 
+
 @petty_cash_bp.route('/accounting', methods=['GET'])
 @login_required
 def accounting_operations():
     """顯示會計作業頁面"""
     form = MonthEndSettlementForm()
-    # 預設為上一個月份
     today = date.today()
     first_day_of_month = today.replace(day=1)
     last_month_date = first_day_of_month - timedelta(days=1)
@@ -313,30 +340,21 @@ def settle_month_end():
         year = int(form.year.data)
         month = int(form.month.data)
 
-        # --- ▼▼▼ 全新的、更穩健的月底餘額計算邏輯 ▼▼▼ ---
-
-        # 1. 定義要計算的目標月份的結束日期
         _, last_day = calendar.monthrange(year, month)
         end_date = date(year, month, last_day)
 
-        # 2. 計算從古至今，到該月底為止的所有收入總額
         total_income = db.session.query(func.sum(Transaction.total_amount)).filter(
             Transaction.transaction_type == TransactionType.INCOME,
             Transaction.transaction_date <= end_date
         ).scalar() or Decimal('0.0')
 
-        # 3. 計算從古至今，到該月底為止的所有支出總額
         total_expenditure = db.session.query(func.sum(Transaction.total_amount)).filter(
             Transaction.transaction_type == TransactionType.EXPENDITURE,
             Transaction.transaction_date <= end_date
         ).scalar() or Decimal('0.0')
 
-        # 4. 直接加總，得到最準確的月底餘額
         month_end_balance = total_income + total_expenditure
 
-        # --- ▲▲▲ 計算邏輯結束 ▲▲▲ ---
-
-        # 檢查是否已存在該筆結轉紀錄，避免重複執行 (後續邏輯不變)
         if month == 12:
             next_month_date = date(year + 1, 1, 1)
         else:
@@ -382,35 +400,8 @@ def settle_month_end():
 @login_required
 def cash_count_tool():
     """顯示現金盤點工具頁面"""
-    # --- ▼▼▼ 使用與首頁 index 完全相同的、最正確的計算邏輯 ▼▼▼ ---
-    
-    # 1. 找到最新的一筆結轉紀錄
-    latest_settlement = Transaction.query.filter(
-        Transaction.description.like('%餘額結轉%')
-    ).order_by(Transaction.transaction_date.desc()).first()
-
-    # 2. 決定計算的起始點（期初餘額）
-    balance = Decimal('0.0')
-    start_date = date(1900, 1, 1)
-    if latest_settlement:
-        balance = latest_settlement.total_amount
-        start_date = latest_settlement.transaction_date
-
-    # 3. 計算從起始點到今天為止，所有新發生的收支
-    income_since_start = db.session.query(func.sum(Transaction.total_amount)).filter(
-        Transaction.transaction_type == TransactionType.INCOME,
-        Transaction.transaction_date > start_date,
-        ~Transaction.description.like('%餘額結轉%')
-    ).scalar() or Decimal('0.0')
-
-    expenditure_since_start = db.session.query(func.sum(Transaction.total_amount)).filter(
-        Transaction.transaction_type == TransactionType.EXPENDITURE,
-        Transaction.transaction_date > start_date
-    ).scalar() or Decimal('0.0')
-
-    # 4. 得到最終正確的目前餘額
-    current_balance = balance + income_since_start + expenditure_since_start
-    
+    # --- 優化：直接呼叫輔助函式 ---
+    current_balance = _calculate_current_balance()
     return render_template('cash_count_tool.html', system_balance=current_balance)
 
 @petty_cash_bp.route('/tools/cash_count/save', methods=['POST'])
@@ -428,12 +419,10 @@ def save_cash_count():
         
         denominations = [1000, 500, 100, 50, 10, 5, 1]
         for denom in denominations:
-            # --- ▼▼▼ 這是修正的地方 ▼▼▼ ---
-            # request.form.get(...) or 0 能確保在收到空字串''時，會用 0 來代替
-            count = int(request.form.get(f'count_{denom}') or 0)
-            # --- ▲▲▲ 修正結束 ▲▲▲ ---
-
-            if count > 0:
+            count_str = request.form.get(f'count_{denom}')
+            # 確保輸入是數字且大於0
+            if count_str and count_str.isdigit() and int(count_str) > 0:
+                count = int(count_str)
                 detail = CashCountDetail(
                     denomination=denom,
                     quantity=count,
@@ -451,13 +440,13 @@ def save_cash_count():
 
     return redirect(url_for('petty_cash.cash_count_tool'))
 
+# ... (cash_count_history, cash_count_session_detail 保持不變) ...
+
 @petty_cash_bp.route('/accounting/cash_count_history')
 @login_required
 def cash_count_history():
     """顯示現金盤點的歷史紀錄列表"""
     page = request.args.get('page', 1, type=int)
-    
-    # 查詢所有的盤點主表紀錄，並依日期排序
     sessions = CashCountSession.query.order_by(CashCountSession.count_date.desc()).paginate(
         page=page, per_page=15, error_out=False
     )
@@ -467,13 +456,8 @@ def cash_count_history():
 @login_required
 def cash_count_session_detail(session_id):
     """顯示單次現金盤點的詳情"""
-    # 使用 get_or_404 可以更優雅地處理找不到紀錄的情況
     session = CashCountSession.query.get_or_404(session_id)
-    
-    # 將盤點明細轉換為字典，方便模板處理
     details_map = {detail.denomination: detail for detail in session.details}
-    
-    # 定義所有可能的面額，以確保模板中能完整顯示
     all_denominations = [1000, 500, 100, 50, 10, 5, 1]
     
     return render_template(
@@ -494,13 +478,12 @@ def approval_dashboard():
     ).order_by(Transaction.application_date.asc()).paginate(
         page=page, per_page=15, error_out=False
     )
-    # ▼▼▼ 在此處新增 ▼▼▼
     rejection_form = RejectionForm()
     
     return render_template(
         'approval_dashboard.html', 
         transactions=pending_transactions,
-        rejection_form=rejection_form # <--- 將表單傳遞給樣板
+        rejection_form=rejection_form
     )
 
 @petty_cash_bp.route('/transaction/<int:transaction_id>/submit', methods=['POST'])
@@ -512,7 +495,6 @@ def submit_for_approval(transaction_id):
         flash('找不到該筆交易。', 'danger')
         return redirect(url_for('petty_cash.index'))
 
-    # 權限檢查：只有本人或主管可以提交
     if transaction.applicant_id != current_user.id and not current_user.is_manager():
          flash('您沒有權限提交此申請。', 'danger')
          return redirect(url_for('petty_cash.transaction_detail', transaction_id=transaction_id))
@@ -520,7 +502,6 @@ def submit_for_approval(transaction_id):
     if transaction.status in [ApprovalStatus.DRAFT, ApprovalStatus.REJECTED]:
         try:
             transaction.status = ApprovalStatus.PENDING
-            # 當重新提交時，清除舊的簽核資訊，重新開始
             transaction.approver_id = None
             transaction.approval_date = None
             transaction.rejection_reason = None
@@ -548,7 +529,7 @@ def approve_transaction(transaction_id):
         try:
             transaction.status = ApprovalStatus.APPROVED
             transaction.approver_id = current_user.id
-            transaction.approval_date = datetime.utcnow()
+            transaction.approval_date = datetime.utcnow().date() # 儲存日期即可
             db.session.commit()
             flash(f'交易 ID: {transaction.id} 已核准。', 'success')
         except Exception as e:
@@ -576,8 +557,8 @@ def reject_transaction(transaction_id):
             try:
                 transaction.status = ApprovalStatus.REJECTED
                 transaction.approver_id = current_user.id
-                transaction.approval_date = datetime.utcnow()
-                transaction.rejection_reason = form.rejection_reason.data # <--- 儲存駁回理由
+                transaction.approval_date = datetime.utcnow().date() # 儲存日期即可
+                transaction.rejection_reason = form.rejection_reason.data
                 db.session.commit()
                 flash(f'交易 ID: {transaction.id} 已駁回。', 'success')
             except Exception as e:
@@ -586,13 +567,16 @@ def reject_transaction(transaction_id):
         else:
             flash('此交易不是待簽核狀態，無法操作。', 'warning')
     else:
-        flash('駁回時發生錯誤，請填寫駁回理由。', 'danger')
+        # 如果表單驗證失敗，顯示具體的錯誤訊息
+        for field, errors in form.errors.items():
+            for error in errors:
+                flash(f'駁回失敗：{error}', 'danger')
         
     return redirect(url_for('petty_cash.approval_dashboard'))
 
 @petty_cash_bp.route('/accounting/cash_count_history/<int:session_id>/delete', methods=['POST'])
 @login_required
-@manager_required # 只有主管才能刪除盤點紀錄
+@manager_required
 def delete_cash_count_session(session_id):
     """刪除一筆現金盤點紀錄"""
     session_to_delete = db.session.get(CashCountSession, session_id)
@@ -601,8 +585,6 @@ def delete_cash_count_session(session_id):
         return redirect(url_for('petty_cash.cash_count_history'))
     
     try:
-        # 因為我們在模型中設定了 cascade='all, delete-orphan'
-        # 所以刪除主表的同時，所有關聯的明細也會被一併刪除
         db.session.delete(session_to_delete)
         db.session.commit()
         flash(f'盤點紀錄 (ID: {session_id}) 已成功刪除。', 'success')
@@ -611,3 +593,48 @@ def delete_cash_count_session(session_id):
         flash(f'刪除時發生錯誤：{e}', 'danger')
         
     return redirect(url_for('petty_cash.cash_count_history'))
+
+# ... (category management 保持不變) ...
+
+@petty_cash_bp.route('/categories')
+@login_required
+@manager_required
+def category_management():
+    """顯示費用分類管理頁面"""
+    categories = Category.query.order_by(Category.name).all()
+    form = CategoryForm()
+    return render_template('category_management.html', categories=categories, form=form)
+
+@petty_cash_bp.route('/categories/add', methods=['POST'])
+@login_required
+@manager_required
+def add_category():
+    """新增費用分類"""
+    form = CategoryForm()
+    if form.validate_on_submit():
+        existing_category = Category.query.filter_by(name=form.name.data).first()
+        if existing_category:
+            flash('錯誤：該分類名稱已存在。', 'danger')
+        else:
+            new_category = Category(name=form.name.data)
+            db.session.add(new_category)
+            db.session.commit()
+            flash('新的費用分類已成功新增！', 'success')
+    return redirect(url_for('petty_cash.category_management'))
+
+@petty_cash_bp.route('/categories/<int:category_id>/delete', methods=['POST'])
+@login_required
+@manager_required
+def delete_category(category_id):
+    """刪除費用分類"""
+    category_to_delete = db.session.get(Category, category_id)
+    if category_to_delete:
+        if category_to_delete.items:
+            flash('錯誤：無法刪除此分類，因為已有支出項目正在使用它。', 'danger')
+        else:
+            db.session.delete(category_to_delete)
+            db.session.commit()
+            flash('費用分類已成功刪除。', 'success')
+    else:
+        flash('找不到該分類。', 'danger')
+    return redirect(url_for('petty_cash.category_management'))
