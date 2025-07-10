@@ -1,15 +1,14 @@
-from flask import Blueprint, render_template, redirect, url_for, flash, request, jsonify
+from flask import Blueprint, render_template, redirect, url_for, flash, request
 from decimal import Decimal, ROUND_HALF_UP
 from flask_login import login_required, current_user
 from app import db
-from .models import Transaction, TransactionItem, TransactionType, TaxType, TaxCalculationMethod, ApprovalStatus, CashCountSession, CashCountDetail
-from .forms import ExpenditureForm, IncomeForm, MonthEndSettlementForm, RejectionForm
+from .models import Transaction, TransactionItem, TransactionType, TaxType, TaxCalculationMethod, ApprovalStatus, CashCountSession, CashCountDetail, Category
+from .forms import ExpenditureForm, IncomeForm, MonthEndSettlementForm, RejectionForm, CategoryForm, ItemForm
 from datetime import date, datetime, timedelta
 from sqlalchemy import func, extract
 from app.modules.user.routes import manager_required
+import json
 import calendar
-from .models import Category
-from .forms import CategoryForm
 
 petty_cash_bp = Blueprint('petty_cash', __name__)
 
@@ -73,19 +72,9 @@ def _calculate_tax_and_total(base_amount, tax_type_str, tax_calc_method_str):
 @login_required
 def index():
     page = request.args.get('page', 1, type=int)
-    transactions_query = Transaction.query.order_by(Transaction.transaction_date.desc(), Transaction.id.desc())
-    transactions = transactions_query.paginate(page=page, per_page=10, error_out=False)
-    
-    # --- 優化：直接呼叫輔助函式 ---
+    transactions = Transaction.query.order_by(Transaction.transaction_date.desc(), Transaction.id.desc()).paginate(page=page, per_page=10, error_out=False)
     current_balance = _calculate_current_balance()
-
-    return render_template(
-        'petty_cash_index.html', 
-        transactions=transactions, 
-        balance=current_balance,
-        TransactionType=TransactionType,
-        ApprovalStatus=ApprovalStatus
-    )
+    return render_template('petty_cash_index.html', transactions=transactions, balance=current_balance, TransactionType=TransactionType, ApprovalStatus=ApprovalStatus)
 
 @petty_cash_bp.route('/transaction/<int:transaction_id>')
 @login_required
@@ -104,58 +93,61 @@ def transaction_detail(transaction_id):
 @petty_cash_bp.route('/expenditure/add', methods=['GET', 'POST'])
 @login_required
 def add_expenditure():
-    form = ExpenditureForm()
+    form = ExpenditureForm(request.form)
+    
+    if request.method == 'POST':
+        # 在驗證前，先過濾掉所有空白的明細
+        valid_items_data = [item for item in form.items.data if item.get('item_name')]
+        while len(form.items.entries) > 0:
+            form.items.pop_entry()
+        for item_data in valid_items_data:
+            form.items.append_entry(item_data)
+
+        if form.validate_on_submit():
+            if not valid_items_data:
+                flash('請至少新增一筆有效的項目明細。', 'warning')
+                return render_template('add_expenditure.html', form=form)
+            try:
+                base_amount = sum(Decimal(item['quantity'] or 0) * Decimal(item['unit_price'] or 0) for item in valid_items_data)
+                subtotal, tax, total_amount = _calculate_tax_and_total(base_amount, form.tax_type.data, form.tax_calculation_method.data)
+                
+                new_transaction = Transaction(
+                    transaction_type=TransactionType.EXPENDITURE,
+                    application_date=form.application_date.data,
+                    erp_document_number=form.erp_document_number.data,
+                    status=ApprovalStatus.DRAFT,
+                    transaction_date=form.transaction_date.data,
+                    applicant_id=current_user.id,
+                    description=form.description.data,
+                    category_id=form.category_id.data.id,
+                    tax_type=TaxType[form.tax_type.data],
+                    tax_calculation_method=TaxCalculationMethod[form.tax_calculation_method.data] if form.tax_calculation_method.data else None,
+                    subtotal=subtotal, tax=tax, total_amount=-total_amount,
+                )
+                
+                for item_data in valid_items_data:
+                    db.session.add(TransactionItem(
+                        item_name=item_data['item_name'],
+                        quantity=Decimal(item_data['quantity'] or 0),
+                        unit=item_data['unit'],
+                        unit_price=Decimal(item_data['unit_price'] or 0),
+                        line_total=Decimal(item_data['quantity'] or 0) * Decimal(item_data['unit_price'] or 0),
+                        transaction=new_transaction
+                    ))
+                
+                db.session.add(new_transaction)
+                db.session.commit()
+                flash('支出紀錄已成功新增！', 'success')
+                return redirect(url_for('petty_cash.index'))
+            except Exception as e:
+                db.session.rollback()
+                flash(f'新增失敗，發生未知錯誤：{e}', 'danger')
+    
+    # 如果是第一次載入頁面 (GET request)
     if request.method == 'GET':
         form.application_date.data = date.today()
         form.transaction_date.data = date.today()
         form.applicant_name.data = current_user.display_name
-
-    if form.validate_on_submit():
-        try:
-            base_amount = sum(Decimal(item['quantity']) * Decimal(item['unit_price']) for item in form.items.data)
-            
-            # --- 優化：直接呼叫輔助函式 ---
-            subtotal, tax, total_amount = _calculate_tax_and_total(
-                base_amount,
-                form.tax_type.data,
-                form.tax_calculation_method.data
-            )
-            
-            new_transaction = Transaction(
-                transaction_type=TransactionType.EXPENDITURE,
-                application_date=form.application_date.data,
-                erp_document_number=form.erp_document_number.data,
-                status=ApprovalStatus.DRAFT,
-                transaction_date=form.transaction_date.data,
-                applicant_id=current_user.id,
-                description=form.description.data,
-                tax_type=TaxType[form.tax_type.data],
-                tax_calculation_method=TaxCalculationMethod[form.tax_calculation_method.data] if form.tax_calculation_method.data else None,
-                subtotal=subtotal, tax=tax, total_amount=-total_amount,
-            )
-            
-            for item_data in form.items.data:
-                # 確保 category_id 是從 QuerySelectField 物件中正確取得 id
-                category_obj = item_data.get('category_id')
-                cat_id = category_obj.id if category_obj else None
-
-                new_item = TransactionItem(
-                    item_name=item_data['item_name'],
-                    quantity=Decimal(item_data['quantity']), unit=item_data['unit'],
-                    unit_price=Decimal(item_data['unit_price']),
-                    line_total=Decimal(item_data['quantity']) * Decimal(item_data['unit_price']),
-                    transaction=new_transaction,
-                    category_id=cat_id
-                )
-                db.session.add(new_item) # 將 new_item 加入 session
-            
-            db.session.add(new_transaction)
-            db.session.commit()
-            flash('支出紀錄已成功新增！', 'success')
-            return redirect(url_for('petty_cash.index'))
-        except Exception as e:
-            db.session.rollback()
-            flash(f'新增失敗，錯誤：{e}', 'danger')
 
     return render_template('add_expenditure.html', form=form)
 
@@ -167,7 +159,6 @@ def edit_transaction(transaction_id):
         flash('找不到該筆支出紀錄。', 'danger')
         return redirect(url_for('petty_cash.index'))
     
-    # 權限檢查：只有草稿或被駁回的單據可以由本人或主管編輯
     is_editable = (transaction.status in [ApprovalStatus.DRAFT, ApprovalStatus.REJECTED] and transaction.applicant_id == current_user.id) or current_user.is_manager()
     if not is_editable:
         flash('此單據狀態無法編輯。', 'warning')
@@ -177,20 +168,16 @@ def edit_transaction(transaction_id):
 
     if form.validate_on_submit():
         try:
-            base_amount = sum(Decimal(item['quantity']) * Decimal(item['unit_price']) for item in form.items.data)
-            
-            # --- 優化：直接呼叫輔助函式 ---
-            subtotal, tax, total_amount = _calculate_tax_and_total(
-                base_amount,
-                form.tax_type.data,
-                form.tax_calculation_method.data
-            )
+            base_amount = sum(Decimal(item['quantity'] or 0) * Decimal(item['unit_price'] or 0) for item in form.items.data)
+            subtotal, tax, total_amount = _calculate_tax_and_total(base_amount, form.tax_type.data, form.tax_calculation_method.data)
 
             # 更新主表資料
             transaction.application_date = form.application_date.data
             transaction.erp_document_number = form.erp_document_number.data
             transaction.transaction_date = form.transaction_date.data
             transaction.description = form.description.data
+            # --- ▼▼▼ 修改點 3：更新 Transaction 主檔的 category_id ▼▼▼ ---
+            transaction.category_id = form.category_id.data.id
             transaction.tax_type = TaxType[form.tax_type.data]
             transaction.tax_calculation_method = TaxCalculationMethod[form.tax_calculation_method.data] if form.tax_calculation_method.data else None
             transaction.subtotal, transaction.tax, transaction.total_amount = subtotal, tax, -total_amount
@@ -201,16 +188,13 @@ def edit_transaction(transaction_id):
             db.session.flush()
 
             for item_data in form.items.data:
-                category_obj = item_data.get('category_id')
-                cat_id = category_obj.id if category_obj else None
-                
                 new_item = TransactionItem(
                     item_name=item_data['item_name'],
-                    quantity=Decimal(item_data['quantity']), unit=item_data['unit'],
+                    quantity=Decimal(item_data['quantity']),
+                    unit=item_data['unit'],
                     unit_price=Decimal(item_data['unit_price']),
                     line_total=Decimal(item_data['quantity']) * Decimal(item_data['unit_price']),
-                    category_id=cat_id,
-                    transaction_id=transaction.id # 關聯回主表
+                    transaction_id=transaction.id
                 )
                 db.session.add(new_item)
             
@@ -221,15 +205,16 @@ def edit_transaction(transaction_id):
             db.session.rollback()
             flash(f'更新失敗，錯誤：{e}', 'danger')
 
-    # GET 請求時，填充表單的預設值
-    form.tax_type.data = transaction.tax_type.name
-    if transaction.tax_calculation_method:
-        form.tax_calculation_method.data = transaction.tax_calculation_method.name
-    form.applicant_name.data = transaction.applicant.display_name
+    elif request.method == 'GET':
+        form.applicant_name.data = transaction.applicant.display_name
+        form.tax_type.data = transaction.tax_type.name
+        if transaction.tax_calculation_method:
+            form.tax_calculation_method.data = transaction.tax_calculation_method.name
+        # 載入頁面時，將現有的分類填入表單
+        if transaction.category:
+            form.category_id.data = transaction.category
 
     return render_template('edit_transaction.html', form=form, transaction_id=transaction_id)
-
-# ... (add_income, edit_income, delete_transaction 保持不變) ...
 
 @petty_cash_bp.route('/income/add', methods=['GET', 'POST'])
 @login_required
@@ -440,8 +425,6 @@ def save_cash_count():
 
     return redirect(url_for('petty_cash.cash_count_tool'))
 
-# ... (cash_count_history, cash_count_session_detail 保持不變) ...
-
 @petty_cash_bp.route('/accounting/cash_count_history')
 @login_required
 def cash_count_history():
@@ -594,7 +577,6 @@ def delete_cash_count_session(session_id):
         
     return redirect(url_for('petty_cash.cash_count_history'))
 
-# ... (category management 保持不變) ...
 
 @petty_cash_bp.route('/categories')
 @login_required
@@ -638,3 +620,62 @@ def delete_category(category_id):
     else:
         flash('找不到該分類。', 'danger')
     return redirect(url_for('petty_cash.category_management'))
+
+# 報表用 #
+@petty_cash_bp.route('/reports/expense_by_category', methods=['GET'])
+@login_required
+@manager_required
+def report_expense_by_category():
+    """費用分類報表頁面"""
+    try:
+        year = int(request.args.get('year', date.today().year))
+        month = int(request.args.get('month', date.today().month))
+    except (ValueError, TypeError):
+        year = date.today().year
+        month = date.today().month
+        flash('日期參數格式錯誤，已顯示當前月份報表。', 'warning')
+
+    # --- ▼▼▼ 修改點 4：修改報表查詢邏輯 ▼▼▼ ---
+    # 現在直接從 Transaction 查詢，不再需要經過 TransactionItem
+    report_data_query = db.session.query(
+        Category.name,
+        func.sum(Transaction.total_amount).label('total_spent')
+    ).join(Transaction.category).filter(
+        Transaction.transaction_type == TransactionType.EXPENDITURE,
+        Transaction.status == ApprovalStatus.APPROVED,
+        extract('year', Transaction.transaction_date) == year,
+        extract('month', Transaction.transaction_date) == month
+    ).group_by(Category.name).order_by(
+        func.sum(Transaction.total_amount).desc()
+    ).all()
+
+    # 報表金額應為正數
+    total_expense = -sum(item.total_spent for item in report_data_query)
+    
+    chart_labels = [item[0] for item in report_data_query]
+    chart_values = [float(-item[1]) for item in report_data_query]
+
+    chart_data = {
+        'labels': json.dumps(chart_labels, ensure_ascii=False),
+        'values': json.dumps(chart_values)
+    }
+
+    table_data = []
+    if total_expense > 0:
+        for category_name, total_spent in report_data_query:
+            amount = -total_spent
+            percentage = (amount / total_expense * 100)
+            table_data.append({
+                'category': category_name,
+                'total': amount,
+                'percentage': f"{percentage:.2f}%"
+            })
+
+    return render_template(
+        'report_expense_by_category.html',
+        year=year,
+        month=month,
+        total_expense=total_expense,
+        table_data=table_data,
+        chart_data=chart_data
+    )

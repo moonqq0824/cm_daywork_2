@@ -30,23 +30,41 @@
                 <ul class="navbar-nav ms-auto">
                     {% if current_user.is_authenticated %}
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('petty_cash.accounting_operations') }}">會計作業</a>
+                        <a class="nav-link" href="{{ url_for('petty_cash.index') }}">交易總覽</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('petty_cash.add_expenditure') }}">新增支出</a>
                     </li>
 
                     {% if current_user.is_manager() %}
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('user.user_management') }}">使用者管理</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('petty_cash.approval_dashboard') }}">收支簽核</a>
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="managementDropdown" role="button"
+                            data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="bi bi-gear-fill"></i> 管理
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="managementDropdown">
+                            <li><a class="dropdown-item" href="{{ url_for('petty_cash.approval_dashboard') }}">收支簽核</a>
+                            </li>
+                            <li><a class="dropdown-item"
+                                    href="{{ url_for('petty_cash.accounting_operations') }}">會計作業</a></li>
+                            <li><a class="dropdown-item"
+                                    href="{{ url_for('petty_cash.report_expense_by_category') }}">費用報表</a></li>
+                            <li>
+                                <hr class="dropdown-divider">
+                            </li>
+                            <li><a class="dropdown-item" href="{{ url_for('user.user_list') }}">使用者管理</a></li>
+                            <li><a class="dropdown-item"
+                                    href="{{ url_for('petty_cash.category_management') }}">費用分類管理</a></li>
+                        </ul>
                     </li>
                     {% endif %}
+
                     <li class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button"
+                        <a class="nav-link dropdown-toggle" href="#" id="userDropdown" role="button"
                             data-bs-toggle="dropdown" aria-expanded="false">
                             <i class="bi bi-person-circle"></i> 歡迎, {{ current_user.display_name }}
                         </a>
-                        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="navbarDropdown">
+                        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown">
                             <li><a class="dropdown-item" href="{{ url_for('user.logout') }}">登出</a></li>
                         </ul>
                     </li>
@@ -71,12 +89,11 @@
         {% endfor %}
         {% endif %}
         {% endwith %}
-
         {% block content %}{% endblock %}
     </main>
 
     <footer class="text-center text-muted py-4 mt-4 bg-light">
-        <p>&copy; {{ current_year }} 您的公司名稱. All Rights Reserved.</p>
+        <p>&copy; {{ current_year }} 晶全豐有限公司. All Rights Reserved.</p>
     </footer>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>

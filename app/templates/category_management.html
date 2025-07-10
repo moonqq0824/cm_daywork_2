@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}費用分類管理{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2>費用分類管理</h2>
+    </div>
+
+    <div class="row">
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-header">
+                    <i class="bi bi-plus-circle-fill"></i> 新增分類
+                </div>
+                <div class="card-body">
+                    <form method="POST" action="{{ url_for('petty_cash.add_category') }}">
+                        {{ form.hidden_tag() }}
+                        <div class="mb-3">
+                            {{ form.name.label(class="form-label") }}
+                            {{ form.name(class="form-control", placeholder="例如：辦公用品") }}
+                        </div>
+                        <div class="d-grid">
+                            {{ form.submit(class="btn btn-primary") }}
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header">
+                    <i class="bi bi-list-ul"></i> 現有分類
+                </div>
+                <div class="card-body">
+                    {% if categories %}
+                    <ul class="list-group">
+                        {% for category in categories %}
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            {{ category.name }}
+                            <form method="POST"
+                                action="{{ url_for('petty_cash.delete_category', category_id=category.id) }}"
+                                onsubmit="return confirm('您確定要刪除這個分類嗎？');">
+                                <button type="submit" class="btn btn-sm btn-outline-danger">
+                                    <i class="bi bi-trash3-fill"></i>
+                                </button>
+                            </form>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                    {% else %}
+                    <p class="text-muted">目前沒有任何費用分類。</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
